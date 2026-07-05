@@ -94,9 +94,13 @@
 
   function init() {
     populateMetricControls();
-    state.map = L.map("map", { zoomControl: true });
+    state.map = L.map("map", {
+      maxZoom: 22,
+      zoomControl: true
+    });
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 20,
+      maxNativeZoom: 19,
+      maxZoom: 22,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     }).addTo(state.map);
 
