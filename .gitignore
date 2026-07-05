@@ -1,0 +1,4 @@
+# Ignore CSV, KML, and GeoJSON survey files
+*.csv
+*.kml
+*.geojson

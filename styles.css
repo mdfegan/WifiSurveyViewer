@@ -1,0 +1,625 @@
+:root {
+  color-scheme: light;
+  --bg: #eef2f3;
+  --panel: #ffffff;
+  --text: #172026;
+  --muted: #5d6972;
+  --border: #d5dde1;
+  --accent: #155e75;
+  --accent-strong: #0f4759;
+  --shadow: 0 12px 32px rgba(24, 38, 45, 0.16);
+  --timeline-h: 245px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Critical Leaflet layout rules. Keep these local so map rendering still works
+   when the CDN stylesheet is blocked or slow to load. */
+.leaflet-container {
+  overflow: hidden;
+  background: #cbd5d8;
+  outline-offset: 1px;
+}
+
+.leaflet-pane,
+.leaflet-tile,
+.leaflet-marker-icon,
+.leaflet-marker-shadow,
+.leaflet-tile-container,
+.leaflet-pane > svg,
+.leaflet-pane > canvas,
+.leaflet-zoom-box,
+.leaflet-image-layer,
+.leaflet-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+.leaflet-tile,
+.leaflet-marker-icon,
+.leaflet-marker-shadow {
+  user-select: none;
+}
+
+.leaflet-tile {
+  display: block;
+  border: 0;
+  visibility: inherit;
+}
+
+.leaflet-tile-pane {
+  z-index: 200;
+}
+
+.leaflet-overlay-pane {
+  z-index: 400;
+}
+
+.leaflet-marker-pane {
+  z-index: 600;
+}
+
+.leaflet-tooltip-pane {
+  z-index: 650;
+}
+
+.leaflet-popup-pane {
+  z-index: 700;
+}
+
+.leaflet-control {
+  position: relative;
+  z-index: 800;
+  pointer-events: auto;
+}
+
+.leaflet-top,
+.leaflet-bottom {
+  position: absolute;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.leaflet-top {
+  top: 0;
+}
+
+.leaflet-right {
+  right: 0;
+}
+
+.leaflet-bottom {
+  bottom: 0;
+}
+
+.leaflet-left {
+  left: 0;
+}
+
+.leaflet-control {
+  float: left;
+  clear: both;
+}
+
+.leaflet-right .leaflet-control {
+  float: right;
+}
+
+.leaflet-top .leaflet-control {
+  margin-top: 10px;
+}
+
+.leaflet-bottom .leaflet-control {
+  margin-bottom: 10px;
+}
+
+.leaflet-left .leaflet-control {
+  margin-left: 10px;
+}
+
+.leaflet-right .leaflet-control {
+  margin-right: 10px;
+}
+
+.leaflet-control-zoom a {
+  display: block;
+  width: 28px;
+  height: 28px;
+  border-bottom: 1px solid #ccc;
+  color: #111827;
+  background: #ffffff;
+  text-align: center;
+  text-decoration: none;
+  font: 700 18px/28px Arial, sans-serif;
+}
+
+.leaflet-control-zoom a:last-child {
+  border-bottom: 0;
+}
+
+.leaflet-control-attribution {
+  padding: 2px 6px;
+  color: #334155;
+  background: rgba(255, 255, 255, 0.82);
+  font-size: 11px;
+}
+
+.leaflet-control-attribution a {
+  color: #155e75;
+}
+
+.leaflet-popup {
+  position: absolute;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.leaflet-popup-content-wrapper {
+  padding: 1px;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.25);
+}
+
+.leaflet-popup-content {
+  margin: 12px;
+  text-align: left;
+  line-height: 1.35;
+}
+
+.leaflet-popup-tip-container {
+  position: absolute;
+  left: 50%;
+  width: 40px;
+  height: 20px;
+  margin-left: -20px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.leaflet-popup-tip {
+  width: 14px;
+  height: 14px;
+  margin: -7px auto 0;
+  background: #ffffff;
+  transform: rotate(45deg);
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.25);
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+button,
+select,
+input {
+  font: inherit;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-rows: minmax(420px, 1fr) var(--timeline-h);
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.map-region {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+#map {
+  position: absolute;
+  inset: 0;
+  background: #cbd5d8;
+}
+
+.topbar,
+.control-panel,
+.hover-card {
+  position: absolute;
+  z-index: 500;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+}
+
+.topbar {
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 72px;
+  padding: 12px 14px;
+  border-radius: 8px;
+}
+
+.brand-block h1 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.brand-block p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.file-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 140px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid #0f766e;
+  border-radius: 6px;
+  color: #ffffff;
+  background: #0f766e;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.file-control input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.control-panel {
+  top: 104px;
+  right: 16px;
+  display: grid;
+  gap: 12px;
+  width: min(330px, calc(100vw - 32px));
+  max-height: calc(100% - 124px);
+  overflow: auto;
+  padding: 14px;
+  border-radius: 8px;
+}
+
+.control-panel label {
+  display: grid;
+  gap: 6px;
+}
+
+.control-panel label span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+select {
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: #ffffff;
+}
+
+.legend {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.legend-title {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.gradient-bar {
+  height: 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.legend-scale {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.category-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.category-item {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.category-item code {
+  overflow: hidden;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.summary-grid div {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #f8fafb;
+}
+
+.summary-grid dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.summary-grid dd {
+  margin: 3px 0 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hover-card {
+  left: 16px;
+  bottom: 16px;
+  width: min(360px, calc(100vw - 32px));
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.hover-card strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.hover-card dl,
+.leaflet-popup-content dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 10px;
+  margin: 0;
+}
+
+.hover-card dt,
+.leaflet-popup-content dt {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.hover-card dd,
+.leaflet-popup-content dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.timeline-panel {
+  position: relative;
+  z-index: 700;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  isolation: isolate;
+}
+
+.timeline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px 6px;
+}
+
+.timeline-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.timeline-header p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#clearSelection {
+  min-width: 70px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--accent-strong);
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.timeline-wrap {
+  min-height: 0;
+  padding: 0 12px 12px;
+}
+
+#timelineSvg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 165px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.route-line {
+  stroke: #28434d;
+  stroke-width: 3;
+  stroke-opacity: 0.65;
+}
+
+.ping-marker {
+  transition: fill 120ms ease, stroke-width 120ms ease, r 120ms ease;
+}
+
+.ping-marker.is-active,
+.ping-marker.is-selected {
+  stroke: #0b1720;
+  stroke-width: 3;
+}
+
+.hop-marker {
+  color: #111827;
+}
+
+.leaflet-popup-content {
+  min-width: 220px;
+}
+
+.timeline-grid {
+  stroke: #dfe6ea;
+  stroke-width: 1;
+}
+
+.timeline-axis {
+  fill: #5d6972;
+  font-size: 11px;
+}
+
+.timeline-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.timeline-area {
+  fill: rgba(21, 94, 117, 0.13);
+}
+
+.timeline-dot {
+  fill: #ffffff;
+  stroke: var(--accent);
+  stroke-width: 1.75;
+  cursor: pointer;
+}
+
+.timeline-dot.is-active,
+.timeline-dot.is-selected {
+  fill: #f97316;
+  stroke: #7c2d12;
+  stroke-width: 3;
+}
+
+.timeline-hop {
+  stroke: #8b1e3f;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+  cursor: pointer;
+}
+
+.timeline-hop-hit {
+  stroke: transparent;
+  stroke-width: 12;
+  cursor: pointer;
+}
+
+.timeline-hop-label {
+  fill: #8b1e3f;
+  font-size: 10px;
+  font-weight: 800;
+  pointer-events: none;
+}
+
+.empty-state {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+@media (max-width: 760px) {
+  :root {
+    --timeline-h: 250px;
+  }
+
+  .app-shell {
+    grid-template-rows: minmax(360px, 1fr) var(--timeline-h);
+  }
+
+  .topbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .file-control {
+    width: 100%;
+  }
+
+  .control-panel {
+    top: 146px;
+    left: 16px;
+    right: 16px;
+    width: auto;
+    max-height: 210px;
+  }
+
+  .summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .hover-card {
+    display: none;
+  }
+}
+
+@media (max-width: 500px) {
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .brand-block h1 {
+    font-size: 18px;
+  }
+}

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>WiFi Survey Viewer</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIINfQWu9lNfP0kM8zNMBU8FQeXMK+uHGI=" crossorigin="">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="map-region" aria-label="Survey map">
+        <div id="map"></div>
+        <div class="topbar">
+          <div class="brand-block">
+            <h1>WiFi Survey Viewer</h1>
+            <p id="datasetName">Loading survey...</p>
+          </div>
+          <label class="file-control">
+            <span>Open GeoJSON</span>
+            <input id="fileInput" type="file" accept=".geojson,application/geo+json,application/json">
+          </label>
+        </div>
+        <aside class="control-panel" aria-label="Map controls">
+          <label>
+            <span>Map metric</span>
+            <select id="mapMetric"></select>
+          </label>
+          <label>
+            <span>Timeline metric</span>
+            <select id="timelineMetric"></select>
+          </label>
+          <div id="legend" class="legend"></div>
+          <dl id="summary" class="summary-grid"></dl>
+        </aside>
+        <div id="hoverCard" class="hover-card" hidden></div>
+      </section>
+
+      <section class="timeline-panel" aria-label="Survey timeline">
+        <div class="timeline-header">
+          <div>
+            <h2 id="timelineTitle">Timeline</h2>
+            <p id="timelineSubtitle">AP changes are marked along the metric trace.</p>
+          </div>
+          <button id="clearSelection" type="button" title="Clear selected point">Clear</button>
+        </div>
+        <div id="timelineWrap" class="timeline-wrap">
+          <svg id="timelineSvg" role="img" aria-label="Metric timeline"></svg>
+        </div>
+      </section>
+    </main>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="app.js"></script>
+  </body>
+</html>
