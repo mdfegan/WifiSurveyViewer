@@ -38,6 +38,27 @@
   top: 0;
 }
 
+.leaflet-pane,
+.leaflet-tile,
+.leaflet-marker-icon,
+.leaflet-marker-shadow,
+.leaflet-pane > svg,
+.leaflet-pane > canvas {
+  pointer-events: none;
+}
+
+.leaflet-marker-icon,
+.leaflet-marker-shadow,
+.leaflet-image-layer,
+.leaflet-pane > svg path,
+.leaflet-interactive {
+  pointer-events: auto;
+}
+
+.leaflet-interactive {
+  cursor: pointer;
+}
+
 .leaflet-tile,
 .leaflet-marker-icon,
 .leaflet-marker-shadow {
@@ -168,6 +189,8 @@
   margin: 12px;
   text-align: left;
   line-height: 1.35;
+  max-height: 360px;
+  overflow: auto;
 }
 
 .leaflet-popup-tip-container {
@@ -409,7 +432,9 @@ select {
 .hover-card {
   left: 16px;
   bottom: 16px;
-  width: min(360px, calc(100vw - 32px));
+  width: min(460px, calc(100vw - 32px));
+  max-height: min(430px, calc(100% - 124px));
+  overflow: auto;
   padding: 12px;
   border-radius: 8px;
   font-size: 13px;
@@ -480,14 +505,46 @@ select {
   cursor: pointer;
 }
 
+.timeline-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.timeline-actions button {
+  min-width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--accent-strong);
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.timeline-actions button:hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
+#timelineZoomLabel {
+  min-width: 44px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
 .timeline-wrap {
   min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
   padding: 0 12px 12px;
 }
 
 #timelineSvg {
   display: block;
-  width: 100%;
   height: 100%;
   min-height: 165px;
   border: 1px solid var(--border);
@@ -516,7 +573,8 @@ select {
 }
 
 .leaflet-popup-content {
-  min-width: 220px;
+  min-width: 260px;
+  max-width: 380px;
 }
 
 .timeline-grid {
@@ -578,6 +636,24 @@ select {
   font-size: 14px;
 }
 
+.detail-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.detail-title strong {
+  margin: 0;
+}
+
+.detail-title span {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 @media (max-width: 760px) {
   :root {
     --timeline-h: 250px;
@@ -610,7 +686,7 @@ select {
   }
 
   .hover-card {
-    display: none;
+    max-height: 190px;
   }
 }
 

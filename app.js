@@ -72,7 +72,8 @@
     hopLayer: null,
     selectedId: null,
     activeId: null,
-    datasetLabel: DEFAULT_GEOJSON
+    datasetLabel: DEFAULT_GEOJSON,
+    timelineZoom: 1
   };
 
   const els = {
@@ -87,6 +88,10 @@
     timelineWrap: document.getElementById("timelineWrap"),
     timelineTitle: document.getElementById("timelineTitle"),
     timelineSubtitle: document.getElementById("timelineSubtitle"),
+    timelineZoomOut: document.getElementById("timelineZoomOut"),
+    timelineZoomIn: document.getElementById("timelineZoomIn"),
+    timelineZoomReset: document.getElementById("timelineZoomReset"),
+    timelineZoomLabel: document.getElementById("timelineZoomLabel"),
     clearSelection: document.getElementById("clearSelection")
   };
 
@@ -113,6 +118,10 @@
     els.timelineMetric.addEventListener("change", renderTimeline);
     els.fileInput.addEventListener("change", handleFilePick);
     els.clearSelection.addEventListener("click", clearSelection);
+    els.timelineZoomOut.addEventListener("click", () => setTimelineZoom(state.timelineZoom / 1.5));
+    els.timelineZoomIn.addEventListener("click", () => setTimelineZoom(state.timelineZoom * 1.5));
+    els.timelineZoomReset.addEventListener("click", () => setTimelineZoom(1));
+    els.timelineWrap.addEventListener("wheel", handleTimelineWheel, { passive: false });
     window.addEventListener("resize", debounce(handleResize, 120));
 
     loadDefaultSurvey();
@@ -130,11 +139,15 @@
   async function loadDefaultSurvey() {
     try {
       const response = await fetch(DEFAULT_GEOJSON);
+      if (response.status === 404) {
+        showEmptyStart();
+        return;
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const geojson = await response.json();
       loadSurvey(geojson, DEFAULT_GEOJSON);
     } catch (error) {
-      showEmpty(`Could not load ${DEFAULT_GEOJSON}. Use Open GeoJSON to choose a survey file.`);
+      showEmptyStart();
       console.error(error);
     }
   }
@@ -180,6 +193,7 @@
     state.datasetLabel = label;
     state.selectedId = null;
     state.activeId = null;
+    state.timelineZoom = 1;
     buildApColors();
     renderAll();
   }
@@ -254,7 +268,7 @@
     const selected = String(sample.id) === String(state.selectedId);
     const active = String(sample.id) === String(state.activeId);
     return {
-      radius: selected ? 8 : active ? 7 : 5,
+      radius: selected ? 9 : active ? 8 : 6,
       fillColor: colorForSample(sample, els.mapMetric.value),
       fillOpacity: 0.86,
       color: selected || active ? "#0b1720" : "#ffffff",
@@ -344,12 +358,16 @@
     svg.replaceChildren();
     if (!state.samples.length) return;
 
-    const rect = els.timelineWrap.getBoundingClientRect();
-    const width = Math.max(360, Math.floor(rect.width));
-    const height = Math.max(160, Math.floor(rect.height));
+    const wrapStyle = window.getComputedStyle(els.timelineWrap);
+    const horizontalPadding = parseFloat(wrapStyle.paddingLeft) + parseFloat(wrapStyle.paddingRight);
+    const viewportWidth = Math.max(360, Math.floor(els.timelineWrap.clientWidth - horizontalPadding));
+    const width = Math.max(viewportWidth, Math.floor(viewportWidth * state.timelineZoom));
+    const height = Math.max(160, Math.floor(els.timelineWrap.clientHeight));
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     svg.setAttribute("width", width);
     svg.setAttribute("height", height);
+    svg.style.width = `${width}px`;
+    updateTimelineZoomLabel();
 
     const metricKey = els.timelineMetric.value;
     const metric = metricOptions[metricKey];
@@ -415,6 +433,7 @@
       state.timelineDots.set(String(point.sample.id), dot);
     }
     applyHighlightClasses();
+    if (state.selectedId) scrollTimelineToSample(state.selectedId, false);
   }
 
   function drawGrid(svg, width, height, margin, yMin, yMax, metric) {
@@ -452,7 +471,8 @@
       const sample = state.samples.find((item) => String(item.id) === String(id));
       if (sample) {
         state.map.panTo([sample.lat, sample.lon], { animate: true, duration: 0.25 });
-        showSampleCard(sample);
+        showSampleCard(sample, true);
+        scrollTimelineToSample(sample.id, true);
       }
     } else {
       hideHoverCard();
@@ -471,7 +491,7 @@
     state.activeId = id == null ? null : String(id);
     if (showCard && id != null) {
       const sample = state.samples.find((item) => String(item.id) === String(id));
-      if (sample) showSampleCard(sample);
+      if (sample) showSampleCard(sample, false);
     } else if (!state.selectedId) {
       hideHoverCard();
     }
@@ -494,12 +514,16 @@
   }
 
   function samplePopup(sample) {
-    return `<strong>${escapeHtml(formatTime(sample.capturedAt))}</strong>${sampleDetails(sample)}`;
+    return `${sampleDetailTitle(sample)}${sampleDetails(sample, true)}`;
   }
 
-  function sampleDetails(sample) {
+  function sampleDetailTitle(sample) {
+    return `<div class="detail-title"><strong>${escapeHtml(formatTime(sample.capturedAt))}</strong><span>Ping ${escapeHtml(String(sample.id))}</span></div>`;
+  }
+
+  function sampleDetails(sample, allFields) {
     const p = sample.props;
-    const rows = [
+    const rows = allFields ? fullSampleRows(sample) : [
       ["SSID", p.ssid || "n/a"],
       ["BSSID", p.bssid || "n/a"],
       ["RSSI", metricOptions.rssi.format(p.rssi_dbm)],
@@ -513,13 +537,28 @@
     return `<dl>${rows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd>`).join("")}</dl>`;
   }
 
+  function fullSampleRows(sample) {
+    const metricLabel = metricOptions[els.timelineMetric.value].label;
+    const timelineValue = metricNumber(sample, metricOptions[els.timelineMetric.value]);
+    const baseRows = [
+      ["Timeline metric", `${metricLabel}: ${timelineValue == null ? "n/a" : metricOptions[els.timelineMetric.value].format(timelineValue)}`],
+      ["Latitude", sample.lat],
+      ["Longitude", sample.lon],
+      ["Captured", formatTime(sample.capturedAt)]
+    ];
+    const propRows = Object.entries(sample.props)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, value]) => [key, value == null || value === "" ? "n/a" : value]);
+    return baseRows.concat(propRows);
+  }
+
   function hopPopup(hop) {
     return `<strong>AP hop</strong><dl><dt>Time</dt><dd>${escapeHtml(formatTime(hop.capturedAt))}</dd><dt>From</dt><dd>${escapeHtml(hop.props.from_bssid || "n/a")}</dd><dt>To</dt><dd>${escapeHtml(hop.props.to_bssid || "n/a")}</dd><dt>SSID</dt><dd>${escapeHtml(hop.props.ssid || "n/a")}</dd></dl>`;
   }
 
-  function showSampleCard(sample) {
+  function showSampleCard(sample, allFields) {
     els.hoverCard.hidden = false;
-    els.hoverCard.innerHTML = `<strong>${escapeHtml(formatTime(sample.capturedAt))}</strong>${sampleDetails(sample)}`;
+    els.hoverCard.innerHTML = `${sampleDetailTitle(sample)}${sampleDetails(sample, allFields)}`;
   }
 
   function showHopCard(hop) {
@@ -529,6 +568,45 @@
 
   function hideHoverCard() {
     if (!state.selectedId) els.hoverCard.hidden = true;
+  }
+
+  function setTimelineZoom(nextZoom) {
+    const previousZoom = state.timelineZoom;
+    const next = clamp(nextZoom, 1, 12);
+    if (Math.abs(next - previousZoom) < 0.01) return;
+    const wrap = els.timelineWrap;
+    const centerRatio = (wrap.scrollLeft + wrap.clientWidth / 2) / Math.max(1, wrap.scrollWidth);
+    state.timelineZoom = next;
+    renderTimeline();
+    window.requestAnimationFrame(() => {
+      wrap.scrollLeft = Math.max(0, centerRatio * wrap.scrollWidth - wrap.clientWidth / 2);
+      if (state.selectedId) scrollTimelineToSample(state.selectedId, false);
+    });
+  }
+
+  function handleTimelineWheel(event) {
+    if (event.ctrlKey || event.altKey) {
+      event.preventDefault();
+      setTimelineZoom(state.timelineZoom * (event.deltaY < 0 ? 1.2 : 1 / 1.2));
+      return;
+    }
+    if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+      event.preventDefault();
+      els.timelineWrap.scrollLeft += event.deltaY;
+    }
+  }
+
+  function updateTimelineZoomLabel() {
+    els.timelineZoomLabel.textContent = `${Number(state.timelineZoom.toFixed(1))}x`;
+  }
+
+  function scrollTimelineToSample(id, smooth) {
+    const dot = state.timelineDots.get(String(id));
+    if (!dot) return;
+    const cx = Number(dot.getAttribute("cx"));
+    if (!Number.isFinite(cx)) return;
+    const target = Math.max(0, cx - els.timelineWrap.clientWidth / 2);
+    els.timelineWrap.scrollTo({ left: target, behavior: smooth ? "smooth" : "auto" });
   }
 
   function hopTitle(hop) {
@@ -556,6 +634,13 @@
     els.timelineSvg.replaceChildren();
     els.legend.textContent = "";
     els.summary.textContent = "";
+  }
+
+  function showEmptyStart() {
+    showEmpty("Upload a GeoJSON survey file to start.");
+    els.timelineTitle.textContent = "Timeline";
+    els.timelineSubtitle.textContent = "Open a survey export to view AP changes and metric history.";
+    drawText(els.timelineSvg, 180, 85, "Upload a GeoJSON survey file to start", "empty-state", "middle");
   }
 
   function metricValues(samples, field) {

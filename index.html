@@ -42,7 +42,13 @@
             <h2 id="timelineTitle">Timeline</h2>
             <p id="timelineSubtitle">AP changes are marked along the metric trace.</p>
           </div>
-          <button id="clearSelection" type="button" title="Clear selected point">Clear</button>
+          <div class="timeline-actions" aria-label="Timeline controls">
+            <button id="timelineZoomOut" type="button" title="Zoom timeline out">-</button>
+            <span id="timelineZoomLabel">1x</span>
+            <button id="timelineZoomIn" type="button" title="Zoom timeline in">+</button>
+            <button id="timelineZoomReset" type="button" title="Reset timeline zoom">Reset</button>
+            <button id="clearSelection" type="button" title="Clear selected point">Clear</button>
+          </div>
         </div>
         <div id="timelineWrap" class="timeline-wrap">
           <svg id="timelineSvg" role="img" aria-label="Metric timeline"></svg>
