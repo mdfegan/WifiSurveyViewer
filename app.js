@@ -82,6 +82,7 @@
     timelineDots: new Map(),
     route: null,
     hopLayer: null,
+    hopHeatLayer: null,
     apEstimateLayer: null,
     selectedId: null,
     activeId: null,
@@ -92,6 +93,8 @@
     apFilterAnchorAt: null,
     showAdjacentAps: false,
     showApEstimates: false,
+    showMapHops: true,
+    showHopHeatmap: false,
     apContext: null
   };
 
@@ -102,6 +105,8 @@
     timelineMetric: document.getElementById("timelineMetric"),
     cellularFilter: document.getElementById("cellularFilter"),
     showApEstimates: document.getElementById("showApEstimates"),
+    showMapHops: document.getElementById("showMapHops"),
+    showHopHeatmap: document.getElementById("showHopHeatmap"),
     previousApFilter: document.getElementById("previousApFilter"),
     clearApFilter: document.getElementById("clearApFilter"),
     nextApFilter: document.getElementById("nextApFilter"),
@@ -143,6 +148,8 @@
     els.timelineMetric.addEventListener("change", renderTimeline);
     els.cellularFilter.addEventListener("change", handleCellularFilterChange);
     els.showApEstimates.addEventListener("change", handleApEstimatesChange);
+    els.showMapHops.addEventListener("change", handleMapHopDisplayChange);
+    els.showHopHeatmap.addEventListener("change", handleMapHopDisplayChange);
     els.fileInput.addEventListener("change", handleFilePick);
     els.clearSelection.addEventListener("click", clearSelection);
     els.previousApFilter.addEventListener("click", () => stepApFilter(-1));
@@ -231,9 +238,13 @@
     state.apFilterAnchorAt = null;
     state.showAdjacentAps = false;
     state.showApEstimates = false;
+    state.showMapHops = true;
+    state.showHopHeatmap = false;
     els.cellularFilter.value = state.cellularFilter;
     els.showAdjacentAps.checked = state.showAdjacentAps;
     els.showApEstimates.checked = state.showApEstimates;
+    els.showMapHops.checked = state.showMapHops;
+    els.showHopHeatmap.checked = state.showHopHeatmap;
     buildApColors();
     renderAll();
   }
@@ -287,6 +298,13 @@
     state.showApEstimates = els.showApEstimates.checked;
     renderMap();
     renderSummary();
+    renderLegend();
+  }
+
+  function handleMapHopDisplayChange() {
+    state.showMapHops = els.showMapHops.checked;
+    state.showHopHeatmap = els.showHopHeatmap.checked;
+    renderMap();
     renderLegend();
   }
 
@@ -344,6 +362,7 @@
     const apEstimates = state.showApEstimates ? estimateApLocations(samples) : [];
     if (state.route) state.route.remove();
     if (state.hopLayer) state.hopLayer.remove();
+    if (state.hopHeatLayer) state.hopHeatLayer.remove();
     if (state.apEstimateLayer) state.apEstimateLayer.remove();
     for (const marker of state.markers.values()) marker.remove();
     state.markers.clear();
@@ -356,6 +375,7 @@
     if (!samples.length) {
       els.datasetName.textContent = state.datasetLabel;
       state.hopLayer = L.layerGroup().addTo(state.map);
+      state.hopHeatLayer = L.layerGroup().addTo(state.map);
       state.apEstimateLayer = L.layerGroup().addTo(state.map);
       return;
     }
@@ -374,14 +394,27 @@
     }
 
     state.hopLayer = L.layerGroup();
-    for (const hop of hops) {
-      L.marker([hop.lat, hop.lon], { icon: hopIcon(hop) })
-        .bindPopup(hopPopup(hop))
-        .on("mouseover", () => showHopCard(hop))
-        .on("mouseout", hideHoverCard)
-        .addTo(state.hopLayer);
+    if (state.showMapHops) {
+      for (const hop of hops) {
+        L.marker([hop.lat, hop.lon], { icon: hopIcon(hop) })
+          .bindPopup(hopPopup(hop))
+          .on("mouseover", () => showHopCard(hop))
+          .on("mouseout", hideHoverCard)
+          .addTo(state.hopLayer);
+      }
     }
     state.hopLayer.addTo(state.map);
+
+    state.hopHeatLayer = L.layerGroup();
+    if (state.showHopHeatmap) {
+      for (const heatPoint of hopHeatPoints(hops)) {
+        L.circleMarker([heatPoint.lat, heatPoint.lon], hopHeatStyle(heatPoint))
+          .bindPopup(hopHeatPopup(heatPoint))
+          .addTo(state.hopHeatLayer);
+      }
+    }
+    state.hopHeatLayer.addTo(state.map);
+
     state.apEstimateLayer = L.layerGroup();
     for (const estimate of apEstimates) {
       L.circleMarker([estimate.lat, estimate.lon], apEstimateStyle(estimate))
@@ -508,6 +541,9 @@
     if (state.apFilter && state.showAdjacentAps) {
       els.legend.append(adjacentApLegendItem());
     }
+    if (state.showHopHeatmap) {
+      els.legend.append(hopHeatLegendItem());
+    }
 
     if (metricKey === "band") {
       renderCategoryLegend(groupCounts(samples.map(connectionBandCategory)), (category) => bandColors[category] || bandColors.Other);
@@ -558,6 +594,18 @@
     swatch.style.background = ADJACENT_AP_COLOR;
     const label = document.createElement("span");
     label.textContent = "Adjacent AP pings";
+    item.append(swatch, label);
+    return item;
+  }
+
+  function hopHeatLegendItem() {
+    const item = document.createElement("div");
+    item.className = "hop-heat-legend";
+    const swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.style.background = "#dc2626";
+    const label = document.createElement("span");
+    label.textContent = "AP hop heat";
     item.append(swatch, label);
     return item;
   }
@@ -860,6 +908,48 @@
       iconSize: [26, 26],
       iconAnchor: [13, 13]
     });
+  }
+
+  function hopHeatPoints(hops) {
+    const cells = new Map();
+    const cellSize = 0.00008;
+    for (const hop of hops) {
+      const key = `${Math.round(hop.lat / cellSize)}:${Math.round(hop.lon / cellSize)}`;
+      if (!cells.has(key)) {
+        cells.set(key, {
+          latSum: 0,
+          lonSum: 0,
+          count: 0
+        });
+      }
+      const cell = cells.get(key);
+      cell.latSum += hop.lat;
+      cell.lonSum += hop.lon;
+      cell.count += 1;
+    }
+
+    return [...cells.values()].map((cell) => ({
+      lat: cell.latSum / cell.count,
+      lon: cell.lonSum / cell.count,
+      count: cell.count
+    }));
+  }
+
+  function hopHeatStyle(point) {
+    const intensity = clamp(point.count, 1, 8);
+    return {
+      radius: 14 + intensity * 4,
+      fillColor: "#dc2626",
+      fillOpacity: clamp(0.13 + intensity * 0.035, 0.16, 0.42),
+      color: "#991b1b",
+      weight: 0,
+      opacity: 0,
+      className: "hop-heat-point"
+    };
+  }
+
+  function hopHeatPopup(point) {
+    return `<strong>AP hop heat</strong><dl><dt>Hops</dt><dd>${escapeHtml(String(point.count))}</dd><dt>Latitude</dt><dd>${escapeHtml(point.lat.toFixed(7))}</dd><dt>Longitude</dt><dd>${escapeHtml(point.lon.toFixed(7))}</dd></dl>`;
   }
 
   function buildApColors() {

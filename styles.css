@@ -492,6 +492,16 @@ select {
   font-weight: 700;
 }
 
+.hop-heat-legend {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -686,6 +696,10 @@ select {
 
 .hop-marker {
   color: #111827;
+}
+
+.hop-heat-point {
+  mix-blend-mode: multiply;
 }
 
 .ap-estimate-marker {
