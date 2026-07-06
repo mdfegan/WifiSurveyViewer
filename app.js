@@ -46,6 +46,9 @@
       legendMin: "0 ms",
       legendMax: (samples) => `${Math.round(Math.max(50, percentile(metricValues(samples, "latency_ms"), 0.95)))} ms p95`
     },
+    band: {
+      label: "Band / cellular"
+    },
     ap: {
       label: "Connected AP",
       field: "bssid"
@@ -53,13 +56,20 @@
   };
 
   const timelineMetricKeys = ["rssi", "packetLoss", "linkSpeed", "latency"];
-  const mapMetricKeys = ["rssi", "packetLoss", "linkSpeed", "latency", "ap"];
+  const mapMetricKeys = ["rssi", "packetLoss", "linkSpeed", "latency", "band", "ap"];
   const categoricalColors = [
     "#0f766e", "#2563eb", "#a21caf", "#e11d48", "#ca8a04", "#16a34a",
     "#7c3aed", "#ea580c", "#0891b2", "#be123c", "#4d7c0f", "#4338ca",
     "#b45309", "#0e7490", "#9f1239", "#15803d", "#6d28d9", "#c2410c",
     "#0369a1", "#854d0e", "#047857", "#7e22ce", "#dc2626", "#1d4ed8"
   ];
+  const bandColors = {
+    "Cellular": "#e11d48",
+    "2.4 GHz": "#2563eb",
+    "5 GHz": "#16a34a",
+    "6 GHz": "#7c3aed",
+    "Other": "#64748b"
+  };
   const ADJACENT_AP_COLOR = "#f97316";
   const AP_ESTIMATE_COLOR = "#111827";
 
@@ -408,6 +418,7 @@
 
   function colorForSample(sample, metricKey) {
     if (isAdjacentApSample(sample)) return ADJACENT_AP_COLOR;
+    if (metricKey === "band") return bandColors[connectionBandCategory(sample)] || bandColors.Other;
     if (metricKey === "ap") return state.apColors.get(sample.props.bssid) || "#64748b";
     const metric = metricOptions[metricKey];
     const value = metricNumber(sample, metric);
@@ -498,24 +509,13 @@
       els.legend.append(adjacentApLegendItem());
     }
 
+    if (metricKey === "band") {
+      renderCategoryLegend(groupCounts(samples.map(connectionBandCategory)), (category) => bandColors[category] || bandColors.Other);
+      return;
+    }
+
     if (metricKey === "ap") {
-      const list = document.createElement("div");
-      list.className = "category-list";
-      const counts = groupCounts(samples.map((sample) => sample.props.bssid || "Unknown"));
-      for (const [bssid, count] of counts) {
-        const item = document.createElement("div");
-        item.className = "category-item";
-        const swatch = document.createElement("span");
-        swatch.className = "swatch";
-        swatch.style.background = state.apColors.get(bssid) || "#64748b";
-        const code = document.createElement("code");
-        code.textContent = bssid;
-        const number = document.createElement("span");
-        number.textContent = count;
-        item.append(swatch, code, number);
-        list.append(item);
-      }
-      els.legend.append(list);
+      renderCategoryLegend(groupCounts(samples.map((sample) => sample.props.bssid || "Unknown")), (bssid) => state.apColors.get(bssid) || "#64748b", true);
       return;
     }
 
@@ -529,6 +529,25 @@
     const maxLabel = typeof metric.legendMax === "function" ? metric.legendMax(samples) : metric.legendMax;
     scale.innerHTML = `<span>${metric.legendMin}</span><span>${maxLabel}</span>`;
     els.legend.append(bar, scale);
+  }
+
+  function renderCategoryLegend(counts, colorForValue, useCode) {
+    const list = document.createElement("div");
+    list.className = "category-list";
+    for (const [value, count] of counts) {
+      const item = document.createElement("div");
+      item.className = "category-item";
+      const swatch = document.createElement("span");
+      swatch.className = "swatch";
+      swatch.style.background = colorForValue(value);
+      const label = document.createElement(useCode ? "code" : "span");
+      label.textContent = value;
+      const number = document.createElement("span");
+      number.textContent = count;
+      item.append(swatch, label, number);
+      list.append(item);
+    }
+    els.legend.append(list);
   }
 
   function adjacentApLegendItem() {
@@ -1032,6 +1051,24 @@
     if (cellular === true || cellular === 1 || cellular === "1") return true;
     if (typeof cellular === "string" && cellular.toLowerCase() === "true") return true;
     return String(props.default_transports || "").toLowerCase().includes("cellular");
+  }
+
+  function connectionBandCategory(sample) {
+    if (isCellularSample(sample)) return "Cellular";
+
+    const band = String(sample.props.band || "").toLowerCase();
+    if (band.includes("2.4")) return "2.4 GHz";
+    if (band.includes("5")) return "5 GHz";
+    if (band.includes("6")) return "6 GHz";
+
+    const frequency = Number(sample.props.frequency_mhz);
+    if (Number.isFinite(frequency)) {
+      if (frequency >= 2400 && frequency < 2500) return "2.4 GHz";
+      if (frequency >= 4900 && frequency < 5900) return "5 GHz";
+      if (frequency >= 5925 && frequency < 7125) return "6 GHz";
+    }
+
+    return "Other";
   }
 
   function showEmpty(message) {
