@@ -330,6 +330,70 @@ input {
   text-transform: uppercase;
 }
 
+.ap-filter-control {
+  display: grid;
+  gap: 6px;
+}
+
+.ap-filter-control span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.ap-stepper {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 38px;
+  gap: 6px;
+}
+
+.ap-stepper button {
+  min-height: 38px;
+  overflow: hidden;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--accent-strong);
+  background: #ffffff;
+  cursor: pointer;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ap-stepper button:first-child,
+.ap-stepper button:last-child {
+  padding: 0;
+  font-size: 16px;
+}
+
+.ap-stepper button:disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.72;
+}
+
+.adjacent-ap-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.adjacent-ap-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #f97316;
+}
+
+.adjacent-ap-toggle span {
+  text-transform: none;
+}
+
 select {
   width: 100%;
   height: 38px;
@@ -398,6 +462,16 @@ select {
   white-space: nowrap;
 }
 
+.adjacent-ap-legend {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -463,6 +537,28 @@ select {
 .leaflet-popup-content dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.sample-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 8px;
+}
+
+.sample-actions button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #0f766e;
+  border-radius: 6px;
+  color: #ffffff;
+  background: #0f766e;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sample-actions button:hover {
+  background: #0f5f59;
 }
 
 .timeline-panel {
@@ -609,6 +705,11 @@ select {
   fill: #f97316;
   stroke: #7c2d12;
   stroke-width: 3;
+}
+
+.timeline-dot.is-adjacent-ap {
+  fill: #f97316;
+  stroke: #9a3412;
 }
 
 .timeline-hop {

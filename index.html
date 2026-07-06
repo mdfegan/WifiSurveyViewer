@@ -38,6 +38,18 @@
               <option value="only">Show only cellular pings</option>
             </select>
           </label>
+          <div class="ap-filter-control">
+            <span>AP focus</span>
+            <div class="ap-stepper">
+              <button id="previousApFilter" type="button" title="Previous connected AP" disabled>&lt;</button>
+              <button id="clearApFilter" type="button" title="Clear AP focus" disabled>All APs</button>
+              <button id="nextApFilter" type="button" title="Next connected AP" disabled>&gt;</button>
+            </div>
+            <label class="adjacent-ap-toggle">
+              <input id="showAdjacentAps" type="checkbox" disabled>
+              <span>Show adjacent APs</span>
+            </label>
+          </div>
           <div id="legend" class="legend"></div>
           <dl id="summary" class="summary-grid"></dl>
         </aside>

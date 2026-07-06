@@ -60,6 +60,7 @@
     "#b45309", "#0e7490", "#9f1239", "#15803d", "#6d28d9", "#c2410c",
     "#0369a1", "#854d0e", "#047857", "#7e22ce", "#dc2626", "#1d4ed8"
   ];
+  const ADJACENT_AP_COLOR = "#f97316";
 
   const state = {
     map: null,
@@ -74,7 +75,10 @@
     activeId: null,
     datasetLabel: DEFAULT_GEOJSON,
     timelineZoom: 1,
-    cellularFilter: "all"
+    cellularFilter: "all",
+    apFilter: null,
+    apFilterAnchorAt: null,
+    showAdjacentAps: false
   };
 
   const els = {
@@ -83,6 +87,10 @@
     mapMetric: document.getElementById("mapMetric"),
     timelineMetric: document.getElementById("timelineMetric"),
     cellularFilter: document.getElementById("cellularFilter"),
+    previousApFilter: document.getElementById("previousApFilter"),
+    clearApFilter: document.getElementById("clearApFilter"),
+    nextApFilter: document.getElementById("nextApFilter"),
+    showAdjacentAps: document.getElementById("showAdjacentAps"),
     legend: document.getElementById("legend"),
     summary: document.getElementById("summary"),
     hoverCard: document.getElementById("hoverCard"),
@@ -121,6 +129,11 @@
     els.cellularFilter.addEventListener("change", handleCellularFilterChange);
     els.fileInput.addEventListener("change", handleFilePick);
     els.clearSelection.addEventListener("click", clearSelection);
+    els.previousApFilter.addEventListener("click", () => stepApFilter(-1));
+    els.clearApFilter.addEventListener("click", clearApFilter);
+    els.nextApFilter.addEventListener("click", () => stepApFilter(1));
+    els.showAdjacentAps.addEventListener("change", handleAdjacentApsChange);
+    document.addEventListener("click", handleSampleActionClick);
     els.timelineZoomOut.addEventListener("click", () => setTimelineZoom(state.timelineZoom / 1.5));
     els.timelineZoomIn.addEventListener("click", () => setTimelineZoom(state.timelineZoom * 1.5));
     els.timelineZoomReset.addEventListener("click", () => setTimelineZoom(1));
@@ -198,13 +211,69 @@
     state.activeId = null;
     state.timelineZoom = 1;
     state.cellularFilter = "all";
+    state.apFilter = null;
+    state.apFilterAnchorAt = null;
+    state.showAdjacentAps = false;
     els.cellularFilter.value = state.cellularFilter;
+    els.showAdjacentAps.checked = state.showAdjacentAps;
     buildApColors();
     renderAll();
   }
 
   function handleCellularFilterChange() {
     state.cellularFilter = els.cellularFilter.value;
+    reconcileSelectionWithVisibleSamples();
+    renderAll();
+  }
+
+  function handleSampleActionClick(event) {
+    const button = event.target.closest("[data-sample-action]");
+    if (!button) return;
+    const action = button.dataset.sampleAction;
+    if (action === "filter-ap") {
+      applyApFilter(button.dataset.bssid, Number(button.dataset.capturedAt));
+    } else if (action === "clear-ap-filter") {
+      clearApFilter();
+    }
+  }
+
+  function applyApFilter(bssid, anchorAt) {
+    if (!bssid) return;
+    state.apFilter = bssid;
+    state.apFilterAnchorAt = Number.isFinite(anchorAt) ? anchorAt : firstSampleForAp(bssid)?.capturedAt ?? null;
+    reconcileSelectionWithVisibleSamples();
+    renderAll();
+  }
+
+  function clearApFilter() {
+    state.apFilter = null;
+    state.apFilterAnchorAt = null;
+    state.showAdjacentAps = false;
+    els.showAdjacentAps.checked = false;
+    reconcileSelectionWithVisibleSamples();
+    renderAll();
+  }
+
+  function handleAdjacentApsChange() {
+    state.showAdjacentAps = els.showAdjacentAps.checked;
+    reconcileSelectionWithVisibleSamples();
+    renderAll();
+  }
+
+  function stepApFilter(direction) {
+    if (!state.apFilter) return;
+    const runs = apRuns();
+    const currentIndex = focusedApRunIndex(runs);
+    const nextIndex = currentIndex + direction;
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= runs.length) return;
+    state.apFilter = runs[nextIndex].bssid;
+    state.apFilterAnchorAt = runs[nextIndex].startAt;
+    state.selectedId = runs[nextIndex].startId;
+    state.activeId = null;
+    renderAll();
+  }
+
+  function reconcileSelectionWithVisibleSamples() {
     const samples = visibleSamples();
     if (!samples.some((sample) => String(sample.id) === String(state.selectedId))) {
       state.selectedId = null;
@@ -213,15 +282,16 @@
     if (!samples.some((sample) => String(sample.id) === String(state.activeId))) {
       state.activeId = null;
     }
-    renderAll();
   }
 
   function renderAll() {
     els.datasetName.textContent = state.datasetLabel;
     renderMap();
     renderSummary();
+    renderApFilterControl();
     renderLegend();
     renderTimeline();
+    refreshVisibleSampleCard();
     refreshMapSize();
   }
 
@@ -305,6 +375,7 @@
   }
 
   function colorForSample(sample, metricKey) {
+    if (isAdjacentApSample(sample)) return ADJACENT_AP_COLOR;
     if (metricKey === "ap") return state.apColors.get(sample.props.bssid) || "#64748b";
     const metric = metricOptions[metricKey];
     const value = metricNumber(sample, metric);
@@ -323,6 +394,8 @@
     const items = [
       ["Points", samples.length.toLocaleString()],
       ["Cellular", state.samples.filter(isCellularSample).length.toLocaleString()],
+      ["AP filter", state.apFilter || "All"],
+      ["Adjacent", state.apFilter && state.showAdjacentAps ? "Shown" : "Hidden"],
       ["AP hops", hops.length.toLocaleString()],
       ["Duration", formatDuration(durationMs)],
       ["SSID", ssids.length === 1 ? ssids[0] : `${ssids.length} SSIDs`],
@@ -340,6 +413,17 @@
     }));
   }
 
+  function renderApFilterControl() {
+    const runs = apRuns();
+    const currentIndex = focusedApRunIndex(runs);
+    els.clearApFilter.textContent = state.apFilter || "All APs";
+    els.clearApFilter.disabled = !state.apFilter;
+    els.previousApFilter.disabled = !state.apFilter || currentIndex <= 0;
+    els.nextApFilter.disabled = !state.apFilter || currentIndex < 0 || currentIndex >= runs.length - 1;
+    els.showAdjacentAps.disabled = !state.apFilter;
+    els.showAdjacentAps.checked = Boolean(state.apFilter && state.showAdjacentAps);
+  }
+
   function renderLegend() {
     const samples = visibleSamples();
     const metricKey = els.mapMetric.value;
@@ -349,6 +433,9 @@
     title.className = "legend-title";
     title.textContent = metric.label;
     els.legend.append(title);
+    if (state.apFilter && state.showAdjacentAps) {
+      els.legend.append(adjacentApLegendItem());
+    }
 
     if (metricKey === "ap") {
       const list = document.createElement("div");
@@ -381,6 +468,18 @@
     const maxLabel = typeof metric.legendMax === "function" ? metric.legendMax(samples) : metric.legendMax;
     scale.innerHTML = `<span>${metric.legendMin}</span><span>${maxLabel}</span>`;
     els.legend.append(bar, scale);
+  }
+
+  function adjacentApLegendItem() {
+    const item = document.createElement("div");
+    item.className = "adjacent-ap-legend";
+    const swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.style.background = ADJACENT_AP_COLOR;
+    const label = document.createElement("span");
+    label.textContent = "Adjacent AP pings";
+    item.append(swatch, label);
+    return item;
   }
 
   function renderTimeline() {
@@ -460,7 +559,7 @@
       dot.setAttribute("cx", x(point.sample.capturedAt));
       dot.setAttribute("cy", y(point.value));
       dot.setAttribute("r", "4");
-      dot.setAttribute("class", timelineDotClass(point.sample.id));
+      dot.setAttribute("class", timelineDotClass(point.sample));
       dot.addEventListener("mouseenter", () => setActive(point.sample.id, true));
       dot.addEventListener("mouseleave", () => setActive(null, true));
       dot.addEventListener("click", () => selectSample(point.sample.id));
@@ -540,21 +639,24 @@
 
   function applyHighlightClasses() {
     renderMapColors();
+    const samplesById = new Map(visibleSamples().map((sample) => [String(sample.id), sample]));
     for (const [id, dot] of state.timelineDots) {
-      dot.setAttribute("class", timelineDotClass(id));
+      dot.setAttribute("class", timelineDotClass(samplesById.get(String(id)) || id));
       dot.setAttribute("r", id === String(state.selectedId) ? "6" : id === String(state.activeId) ? "5.5" : "4");
     }
   }
 
-  function timelineDotClass(id) {
+  function timelineDotClass(sampleOrId) {
+    const id = typeof sampleOrId === "object" && sampleOrId ? sampleOrId.id : sampleOrId;
     const classes = ["timeline-dot"];
+    if (typeof sampleOrId === "object" && isAdjacentApSample(sampleOrId)) classes.push("is-adjacent-ap");
     if (String(id) === String(state.activeId)) classes.push("is-active");
     if (String(id) === String(state.selectedId)) classes.push("is-selected");
     return classes.join(" ");
   }
 
   function samplePopup(sample) {
-    return `${sampleDetailTitle(sample)}${sampleDetails(sample, true)}`;
+    return `${sampleDetailTitle(sample)}${sampleActions(sample)}${sampleDetails(sample, true)}`;
   }
 
   function sampleDetailTitle(sample) {
@@ -575,6 +677,16 @@
       ["Probe", p.probe_success ? "success" : (p.probe_error || "failed")]
     ];
     return `<dl>${rows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd>`).join("")}</dl>`;
+  }
+
+  function sampleActions(sample) {
+    const bssid = sample.props.bssid;
+    if (!bssid) return "";
+    const isActiveFilter = state.apFilter === bssid;
+    const primary = isActiveFilter
+      ? `<button type="button" data-sample-action="clear-ap-filter">Show all APs</button>`
+      : `<button type="button" data-sample-action="filter-ap" data-bssid="${escapeHtml(bssid)}" data-captured-at="${escapeHtml(sample.capturedAt)}">Only this AP</button>`;
+    return `<div class="sample-actions">${primary}</div>`;
   }
 
   function fullSampleRows(sample) {
@@ -598,7 +710,14 @@
 
   function showSampleCard(sample, allFields) {
     els.hoverCard.hidden = false;
-    els.hoverCard.innerHTML = `${sampleDetailTitle(sample)}${sampleDetails(sample, allFields)}`;
+    els.hoverCard.innerHTML = `${sampleDetailTitle(sample)}${sampleActions(sample)}${sampleDetails(sample, allFields)}`;
+  }
+
+  function refreshVisibleSampleCard() {
+    const id = state.selectedId || state.activeId;
+    if (!id) return;
+    const sample = visibleSamples().find((item) => String(item.id) === String(id));
+    if (sample) showSampleCard(sample, Boolean(state.selectedId));
   }
 
   function showHopCard(hop) {
@@ -670,20 +789,85 @@
   }
 
   function visibleSamples() {
+    let samples = samplesWithoutApFilter();
+    if (state.apFilter) {
+      samples = samples.filter((sample) => sample.props.bssid === state.apFilter || isAdjacentApSample(sample));
+    }
+    return samples;
+  }
+
+  function samplesWithoutApFilter() {
+    let samples = state.samples;
     if (state.cellularFilter === "hide") {
-      return state.samples.filter((sample) => !isCellularSample(sample));
+      samples = samples.filter((sample) => !isCellularSample(sample));
     }
     if (state.cellularFilter === "only") {
-      return state.samples.filter(isCellularSample);
+      samples = samples.filter(isCellularSample);
     }
-    return state.samples;
+    return samples;
+  }
+
+  function apRuns() {
+    const runs = [];
+    for (const sample of samplesWithoutApFilter()) {
+      const bssid = sample.props.bssid;
+      if (!bssid) continue;
+      const last = runs[runs.length - 1];
+      if (last && last.bssid === bssid) {
+        last.endAt = sample.capturedAt;
+        last.count += 1;
+      } else {
+        runs.push({
+          bssid,
+          startAt: sample.capturedAt,
+          endAt: sample.capturedAt,
+          startId: sample.id,
+          count: 1
+        });
+      }
+    }
+    return runs;
+  }
+
+  function focusedApRunIndex(runs) {
+    if (!state.apFilter) return -1;
+    const anchorAt = Number(state.apFilterAnchorAt);
+    if (Number.isFinite(anchorAt)) {
+      const anchoredIndex = runs.findIndex((run) => run.bssid === state.apFilter && anchorAt >= run.startAt && anchorAt <= run.endAt);
+      if (anchoredIndex >= 0) return anchoredIndex;
+    }
+    return runs.findIndex((run) => run.bssid === state.apFilter);
+  }
+
+  function firstSampleForAp(bssid) {
+    return samplesWithoutApFilter().find((sample) => sample.props.bssid === bssid);
+  }
+
+  function adjacentApRuns() {
+    if (!state.apFilter || !state.showAdjacentAps) return [];
+    const runs = apRuns();
+    const currentIndex = focusedApRunIndex(runs);
+    if (currentIndex < 0) return [];
+    return [runs[currentIndex - 1], runs[currentIndex + 1]].filter(Boolean);
+  }
+
+  function isAdjacentApSample(sample) {
+    return adjacentApRuns().some((run) => (
+      sample.props.bssid === run.bssid
+      && sample.capturedAt >= run.startAt
+      && sample.capturedAt <= run.endAt
+    ));
   }
 
   function visibleHops(samples) {
     if (!samples.length) return [];
     const first = samples[0].capturedAt;
     const last = samples[samples.length - 1].capturedAt;
-    return state.hops.filter((hop) => hop.capturedAt >= first && hop.capturedAt <= last);
+    return state.hops.filter((hop) => {
+      if (hop.capturedAt < first || hop.capturedAt > last) return false;
+      if (!state.apFilter) return true;
+      return hop.props.from_bssid === state.apFilter || hop.props.to_bssid === state.apFilter;
+    });
   }
 
   function isCellularSample(sample) {
