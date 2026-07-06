@@ -61,6 +61,7 @@
     "#0369a1", "#854d0e", "#047857", "#7e22ce", "#dc2626", "#1d4ed8"
   ];
   const ADJACENT_AP_COLOR = "#f97316";
+  const AP_ESTIMATE_COLOR = "#111827";
 
   const state = {
     map: null,
@@ -71,6 +72,7 @@
     timelineDots: new Map(),
     route: null,
     hopLayer: null,
+    apEstimateLayer: null,
     selectedId: null,
     activeId: null,
     datasetLabel: DEFAULT_GEOJSON,
@@ -79,6 +81,7 @@
     apFilter: null,
     apFilterAnchorAt: null,
     showAdjacentAps: false,
+    showApEstimates: false,
     apContext: null
   };
 
@@ -88,6 +91,7 @@
     mapMetric: document.getElementById("mapMetric"),
     timelineMetric: document.getElementById("timelineMetric"),
     cellularFilter: document.getElementById("cellularFilter"),
+    showApEstimates: document.getElementById("showApEstimates"),
     previousApFilter: document.getElementById("previousApFilter"),
     clearApFilter: document.getElementById("clearApFilter"),
     nextApFilter: document.getElementById("nextApFilter"),
@@ -128,6 +132,7 @@
     });
     els.timelineMetric.addEventListener("change", renderTimeline);
     els.cellularFilter.addEventListener("change", handleCellularFilterChange);
+    els.showApEstimates.addEventListener("change", handleApEstimatesChange);
     els.fileInput.addEventListener("change", handleFilePick);
     els.clearSelection.addEventListener("click", clearSelection);
     els.previousApFilter.addEventListener("click", () => stepApFilter(-1));
@@ -215,8 +220,10 @@
     state.apFilter = null;
     state.apFilterAnchorAt = null;
     state.showAdjacentAps = false;
+    state.showApEstimates = false;
     els.cellularFilter.value = state.cellularFilter;
     els.showAdjacentAps.checked = state.showAdjacentAps;
+    els.showApEstimates.checked = state.showApEstimates;
     buildApColors();
     renderAll();
   }
@@ -264,6 +271,13 @@
     invalidateApContext();
     reconcileSelectionWithVisibleSamples();
     renderAll();
+  }
+
+  function handleApEstimatesChange() {
+    state.showApEstimates = els.showApEstimates.checked;
+    renderMap();
+    renderSummary();
+    renderLegend();
   }
 
   function stepApFilter(direction) {
@@ -317,8 +331,10 @@
   function renderMap() {
     const samples = visibleSamples();
     const hops = visibleHops(samples);
+    const apEstimates = state.showApEstimates ? estimateApLocations(samples) : [];
     if (state.route) state.route.remove();
     if (state.hopLayer) state.hopLayer.remove();
+    if (state.apEstimateLayer) state.apEstimateLayer.remove();
     for (const marker of state.markers.values()) marker.remove();
     state.markers.clear();
 
@@ -330,6 +346,7 @@
     if (!samples.length) {
       els.datasetName.textContent = state.datasetLabel;
       state.hopLayer = L.layerGroup().addTo(state.map);
+      state.apEstimateLayer = L.layerGroup().addTo(state.map);
       return;
     }
 
@@ -355,6 +372,13 @@
         .addTo(state.hopLayer);
     }
     state.hopLayer.addTo(state.map);
+    state.apEstimateLayer = L.layerGroup();
+    for (const estimate of apEstimates) {
+      L.circleMarker([estimate.lat, estimate.lon], apEstimateStyle(estimate))
+        .bindPopup(apEstimatePopup(estimate))
+        .addTo(state.apEstimateLayer);
+    }
+    state.apEstimateLayer.addTo(state.map);
     state.map.fitBounds(state.route.getBounds().pad(0.18));
   }
 
@@ -393,9 +417,37 @@
     return metric.goodHigh ? rampRedYellowGreen(ratio) : rampGreenYellowRed(ratio);
   }
 
+  function apEstimateStyle(estimate) {
+    return {
+      radius: estimate.confidence === "high" ? 10 : estimate.confidence === "medium" ? 8 : 7,
+      fillColor: AP_ESTIMATE_COLOR,
+      fillOpacity: 0.88,
+      color: "#ffffff",
+      weight: 2,
+      opacity: 1,
+      className: `ap-estimate-marker confidence-${estimate.confidence}`
+    };
+  }
+
+  function apEstimatePopup(estimate) {
+    const rows = [
+      ["BSSID", estimate.bssid],
+      ["SSID", estimate.ssid || "n/a"],
+      ["Samples", estimate.sampleCount],
+      ["Strongest RSSI", metricOptions.rssi.format(estimate.maxRssi)],
+      ["Mean RSSI", metricOptions.rssi.format(estimate.meanRssi)],
+      ["Scatter radius", `${Math.round(estimate.scatterM)} m`],
+      ["Confidence", estimate.confidence],
+      ["Latitude", estimate.lat.toFixed(7)],
+      ["Longitude", estimate.lon.toFixed(7)]
+    ];
+    return `<strong>Estimated AP location</strong><dl>${rows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd>`).join("")}</dl>`;
+  }
+
   function renderSummary() {
     const samples = visibleSamples();
     const hops = visibleHops(samples);
+    const apEstimateCount = state.showApEstimates ? estimateApLocations(samples).length : 0;
     const durationMs = samples.length ? samples[samples.length - 1].capturedAt - samples[0].capturedAt : 0;
     const ssids = unique(samples.map((sample) => sample.props.ssid).filter(Boolean));
     const apCount = unique(samples.map((sample) => sample.props.bssid).filter(Boolean)).length;
@@ -404,6 +456,7 @@
       ["Cellular", state.samples.filter(isCellularSample).length.toLocaleString()],
       ["AP filter", state.apFilter || "All"],
       ["Adjacent", state.apFilter && state.showAdjacentAps ? "Shown" : "Hidden"],
+      ["AP estimates", state.showApEstimates ? apEstimateCount.toLocaleString() : "Hidden"],
       ["AP hops", hops.length.toLocaleString()],
       ["Duration", formatDuration(durationMs)],
       ["SSID", ssids.length === 1 ? ssids[0] : `${ssids.length} SSIDs`],
@@ -907,6 +960,72 @@
     });
   }
 
+  function estimateApLocations(samples) {
+    const groups = new Map();
+    for (const sample of samples) {
+      const bssid = sample.props.bssid;
+      const rssi = Number(sample.props.rssi_dbm);
+      if (!bssid || !Number.isFinite(rssi)) continue;
+      if (!groups.has(bssid)) groups.set(bssid, []);
+      groups.get(bssid).push(sample);
+    }
+
+    const estimates = [];
+    for (const [bssid, group] of groups) {
+      const usable = group
+        .map((sample) => ({ sample, rssi: Number(sample.props.rssi_dbm), accuracy: Number(sample.props.accuracy_m) }))
+        .filter((item) => Number.isFinite(item.rssi) && Number.isFinite(item.sample.lat) && Number.isFinite(item.sample.lon));
+      if (usable.length < 3) continue;
+
+      let weightSum = 0;
+      let latSum = 0;
+      let lonSum = 0;
+      let rssiSum = 0;
+      let strongest = -Infinity;
+      for (const item of usable) {
+        const weight = apEstimateWeight(item.rssi, item.accuracy);
+        weightSum += weight;
+        latSum += item.sample.lat * weight;
+        lonSum += item.sample.lon * weight;
+        rssiSum += item.rssi;
+        strongest = Math.max(strongest, item.rssi);
+      }
+      if (weightSum <= 0) continue;
+
+      const lat = latSum / weightSum;
+      const lon = lonSum / weightSum;
+      const distances = usable.map((item) => distanceMeters(lat, lon, item.sample.lat, item.sample.lon));
+      const scatterM = percentile(distances, 0.7);
+      estimates.push({
+        bssid,
+        ssid: mostCommon(usable.map((item) => item.sample.props.ssid).filter(Boolean)),
+        lat,
+        lon,
+        sampleCount: usable.length,
+        maxRssi: strongest,
+        meanRssi: rssiSum / usable.length,
+        scatterM,
+        confidence: apEstimateConfidence(usable.length, strongest, scatterM)
+      });
+    }
+
+    return estimates.sort((a, b) => b.sampleCount - a.sampleCount || a.bssid.localeCompare(b.bssid));
+  }
+
+  function apEstimateWeight(rssi, accuracy) {
+    const boundedRssi = clamp(rssi, -95, -35);
+    const signalWeight = Math.pow(10, (boundedRssi + 95) / 18);
+    const boundedAccuracy = Number.isFinite(accuracy) && accuracy > 0 ? clamp(accuracy, 4, 80) : 25;
+    const accuracyWeight = 1 / Math.pow(boundedAccuracy, 1.15);
+    return signalWeight * accuracyWeight;
+  }
+
+  function apEstimateConfidence(sampleCount, maxRssi, scatterM) {
+    if (sampleCount >= 12 && maxRssi >= -62 && scatterM <= 35) return "high";
+    if (sampleCount >= 6 && maxRssi >= -75 && scatterM <= 85) return "medium";
+    return "low";
+  }
+
   function isCellularSample(sample) {
     const props = sample.props || {};
     const cellular = props.transport_cellular;
@@ -960,6 +1079,10 @@
     return [...counts.entries()].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
   }
 
+  function mostCommon(values) {
+    return groupCounts(values)[0]?.[0] || "";
+  }
+
   function unique(values) {
     return [...new Set(values)];
   }
@@ -1003,6 +1126,20 @@
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
     return minutes ? `${minutes}m ${seconds}s` : `${seconds}s`;
+  }
+
+  function distanceMeters(latA, lonA, latB, lonB) {
+    const earthRadiusM = 6371008.8;
+    const phi1 = toRadians(latA);
+    const phi2 = toRadians(latB);
+    const deltaPhi = toRadians(latB - latA);
+    const deltaLambda = toRadians(lonB - lonA);
+    const a = Math.sin(deltaPhi / 2) ** 2 + Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) ** 2;
+    return 2 * earthRadiusM * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  function toRadians(value) {
+    return (Number(value) * Math.PI) / 180;
   }
 
   function drawLine(svg, x1, y1, x2, y2, className) {
