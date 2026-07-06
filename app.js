@@ -73,7 +73,8 @@
     selectedId: null,
     activeId: null,
     datasetLabel: DEFAULT_GEOJSON,
-    timelineZoom: 1
+    timelineZoom: 1,
+    cellularFilter: "all"
   };
 
   const els = {
@@ -81,6 +82,7 @@
     fileInput: document.getElementById("fileInput"),
     mapMetric: document.getElementById("mapMetric"),
     timelineMetric: document.getElementById("timelineMetric"),
+    cellularFilter: document.getElementById("cellularFilter"),
     legend: document.getElementById("legend"),
     summary: document.getElementById("summary"),
     hoverCard: document.getElementById("hoverCard"),
@@ -116,6 +118,7 @@
       renderLegend();
     });
     els.timelineMetric.addEventListener("change", renderTimeline);
+    els.cellularFilter.addEventListener("change", handleCellularFilterChange);
     els.fileInput.addEventListener("change", handleFilePick);
     els.clearSelection.addEventListener("click", clearSelection);
     els.timelineZoomOut.addEventListener("click", () => setTimelineZoom(state.timelineZoom / 1.5));
@@ -194,7 +197,22 @@
     state.selectedId = null;
     state.activeId = null;
     state.timelineZoom = 1;
+    state.cellularFilter = "all";
+    els.cellularFilter.value = state.cellularFilter;
     buildApColors();
+    renderAll();
+  }
+
+  function handleCellularFilterChange() {
+    state.cellularFilter = els.cellularFilter.value;
+    const samples = visibleSamples();
+    if (!samples.some((sample) => String(sample.id) === String(state.selectedId))) {
+      state.selectedId = null;
+      hideHoverCard();
+    }
+    if (!samples.some((sample) => String(sample.id) === String(state.activeId))) {
+      state.activeId = null;
+    }
     renderAll();
   }
 
@@ -219,6 +237,8 @@
   }
 
   function renderMap() {
+    const samples = visibleSamples();
+    const hops = visibleHops(samples);
     if (state.route) state.route.remove();
     if (state.hopLayer) state.hopLayer.remove();
     for (const marker of state.markers.values()) marker.remove();
@@ -229,10 +249,16 @@
       return;
     }
 
-    const latLngs = state.samples.map((sample) => [sample.lat, sample.lon]);
+    if (!samples.length) {
+      els.datasetName.textContent = state.datasetLabel;
+      state.hopLayer = L.layerGroup().addTo(state.map);
+      return;
+    }
+
+    const latLngs = samples.map((sample) => [sample.lat, sample.lon]);
     state.route = L.polyline(latLngs, { className: "route-line" }).addTo(state.map);
 
-    for (const sample of state.samples) {
+    for (const sample of samples) {
       const marker = L.circleMarker([sample.lat, sample.lon], markerStyle(sample))
         .bindPopup(samplePopup(sample))
         .on("mouseover", () => setActive(sample.id, true))
@@ -243,7 +269,7 @@
     }
 
     state.hopLayer = L.layerGroup();
-    for (const hop of state.hops) {
+    for (const hop of hops) {
       L.marker([hop.lat, hop.lon], { icon: hopIcon(hop) })
         .bindPopup(hopPopup(hop))
         .on("mouseover", () => showHopCard(hop))
@@ -255,7 +281,7 @@
   }
 
   function renderMapColors() {
-    for (const sample of state.samples) {
+    for (const sample of visibleSamples()) {
       const marker = state.markers.get(String(sample.id));
       if (!marker) continue;
       marker.setStyle(markerStyle(sample));
@@ -283,22 +309,25 @@
     const metric = metricOptions[metricKey];
     const value = metricNumber(sample, metric);
     if (value == null) return "#94a3b8";
-    const [min, max] = metric.domain(state.samples);
+    const [min, max] = metric.domain(visibleSamples());
     const ratio = clamp((value - min) / (max - min), 0, 1);
     return metric.goodHigh ? rampRedYellowGreen(ratio) : rampGreenYellowRed(ratio);
   }
 
   function renderSummary() {
-    const durationMs = state.samples.length ? state.samples[state.samples.length - 1].capturedAt - state.samples[0].capturedAt : 0;
-    const ssids = unique(state.samples.map((sample) => sample.props.ssid).filter(Boolean));
-    const apCount = unique(state.samples.map((sample) => sample.props.bssid).filter(Boolean)).length;
+    const samples = visibleSamples();
+    const hops = visibleHops(samples);
+    const durationMs = samples.length ? samples[samples.length - 1].capturedAt - samples[0].capturedAt : 0;
+    const ssids = unique(samples.map((sample) => sample.props.ssid).filter(Boolean));
+    const apCount = unique(samples.map((sample) => sample.props.bssid).filter(Boolean)).length;
     const items = [
-      ["Points", state.samples.length.toLocaleString()],
-      ["AP hops", state.hops.length.toLocaleString()],
+      ["Points", samples.length.toLocaleString()],
+      ["Cellular", state.samples.filter(isCellularSample).length.toLocaleString()],
+      ["AP hops", hops.length.toLocaleString()],
       ["Duration", formatDuration(durationMs)],
       ["SSID", ssids.length === 1 ? ssids[0] : `${ssids.length} SSIDs`],
       ["Unique APs", apCount.toLocaleString()],
-      ["Started", state.samples.length ? formatTime(state.samples[0].capturedAt) : "n/a"]
+      ["Started", samples.length ? formatTime(samples[0].capturedAt) : "n/a"]
     ];
     els.summary.replaceChildren(...items.map(([term, value]) => {
       const wrapper = document.createElement("div");
@@ -312,6 +341,7 @@
   }
 
   function renderLegend() {
+    const samples = visibleSamples();
     const metricKey = els.mapMetric.value;
     const metric = metricOptions[metricKey];
     els.legend.innerHTML = "";
@@ -323,7 +353,7 @@
     if (metricKey === "ap") {
       const list = document.createElement("div");
       list.className = "category-list";
-      const counts = groupCounts(state.samples.map((sample) => sample.props.bssid || "Unknown"));
+      const counts = groupCounts(samples.map((sample) => sample.props.bssid || "Unknown"));
       for (const [bssid, count] of counts) {
         const item = document.createElement("div");
         item.className = "category-item";
@@ -348,12 +378,14 @@
       : "linear-gradient(90deg, #16a34a, #facc15, #dc2626)";
     const scale = document.createElement("div");
     scale.className = "legend-scale";
-    const maxLabel = typeof metric.legendMax === "function" ? metric.legendMax(state.samples) : metric.legendMax;
+    const maxLabel = typeof metric.legendMax === "function" ? metric.legendMax(samples) : metric.legendMax;
     scale.innerHTML = `<span>${metric.legendMin}</span><span>${maxLabel}</span>`;
     els.legend.append(bar, scale);
   }
 
   function renderTimeline() {
+    const samples = visibleSamples();
+    const hops = visibleHops(samples);
     const svg = els.timelineSvg;
     svg.replaceChildren();
     if (!state.samples.length) return;
@@ -372,22 +404,28 @@
     const metricKey = els.timelineMetric.value;
     const metric = metricOptions[metricKey];
     els.timelineTitle.textContent = `${metric.label} Timeline`;
-    els.timelineSubtitle.textContent = `${state.hops.length} AP changes marked across ${formatDuration(state.samples[state.samples.length - 1].capturedAt - state.samples[0].capturedAt)}.`;
+    if (!samples.length) {
+      els.timelineSubtitle.textContent = "No pings match the current cellular filter.";
+      drawText(svg, width / 2, height / 2, "No matching pings", "empty-state", "middle");
+      state.timelineDots.clear();
+      return;
+    }
+    els.timelineSubtitle.textContent = `${hops.length} AP changes marked across ${formatDuration(samples[samples.length - 1].capturedAt - samples[0].capturedAt)}.`;
 
     const margin = { top: 18, right: 22, bottom: 28, left: 54 };
     const plotW = width - margin.left - margin.right;
     const plotH = height - margin.top - margin.bottom;
-    const tMin = state.samples[0].capturedAt;
-    const tMax = state.samples[state.samples.length - 1].capturedAt;
-    const [yMin, yMax] = metric.domain(state.samples);
+    const tMin = samples[0].capturedAt;
+    const tMax = samples[samples.length - 1].capturedAt;
+    const [yMin, yMax] = metric.domain(samples);
     const x = (time) => margin.left + ((time - tMin) / Math.max(1, tMax - tMin)) * plotW;
     const y = (value) => margin.top + (1 - clamp((value - yMin) / Math.max(1, yMax - yMin), 0, 1)) * plotH;
     const baseline = margin.top + plotH;
 
-    drawGrid(svg, width, height, margin, yMin, yMax, metric);
-    drawHops(svg, x, margin, plotH);
+    drawGrid(svg, width, height, margin, yMin, yMax, metric, samples);
+    drawHops(svg, x, margin, plotH, hops);
 
-    const valid = state.samples
+    const valid = samples
       .map((sample) => ({ sample, value: metricNumber(sample, metric) }))
       .filter((point) => point.value != null);
 
@@ -398,7 +436,7 @@
 
     const lineParts = [];
     let current = [];
-    for (const sample of state.samples) {
+    for (const sample of samples) {
       const value = metricNumber(sample, metric);
       if (value == null) {
         if (current.length) lineParts.push(current);
@@ -436,7 +474,7 @@
     if (state.selectedId) scrollTimelineToSample(state.selectedId, false);
   }
 
-  function drawGrid(svg, width, height, margin, yMin, yMax, metric) {
+  function drawGrid(svg, width, height, margin, yMin, yMax, metric, samples) {
     const plotH = height - margin.top - margin.bottom;
     const plotW = width - margin.left - margin.right;
     for (let i = 0; i <= 4; i++) {
@@ -447,12 +485,12 @@
     }
     drawLine(svg, margin.left, margin.top, margin.left, height - margin.bottom, "timeline-grid");
     drawLine(svg, margin.left, height - margin.bottom, margin.left + plotW, height - margin.bottom, "timeline-grid");
-    drawText(svg, margin.left, height - 8, formatTime(state.samples[0].capturedAt), "timeline-axis", "start");
-    drawText(svg, width - margin.right, height - 8, formatTime(state.samples[state.samples.length - 1].capturedAt), "timeline-axis", "end");
+    drawText(svg, margin.left, height - 8, formatTime(samples[0].capturedAt), "timeline-axis", "start");
+    drawText(svg, width - margin.right, height - 8, formatTime(samples[samples.length - 1].capturedAt), "timeline-axis", "end");
   }
 
-  function drawHops(svg, x, margin, plotH) {
-    state.hops.forEach((hop, index) => {
+  function drawHops(svg, x, margin, plotH, hops) {
+    hops.forEach((hop, index) => {
       const xPos = x(hop.capturedAt);
       drawLine(svg, xPos, margin.top, xPos, margin.top + plotH, "timeline-hop");
       const hit = drawLine(svg, xPos, margin.top, xPos, margin.top + plotH, "timeline-hop-hit");
@@ -468,11 +506,13 @@
   function selectSample(id) {
     state.selectedId = String(state.selectedId) === String(id) ? null : String(id);
     if (state.selectedId) {
-      const sample = state.samples.find((item) => String(item.id) === String(id));
+      const sample = visibleSamples().find((item) => String(item.id) === String(id));
       if (sample) {
         state.map.panTo([sample.lat, sample.lon], { animate: true, duration: 0.25 });
         showSampleCard(sample, true);
         scrollTimelineToSample(sample.id, true);
+      } else {
+        state.selectedId = null;
       }
     } else {
       hideHoverCard();
@@ -490,7 +530,7 @@
   function setActive(id, showCard) {
     state.activeId = id == null ? null : String(id);
     if (showCard && id != null) {
-      const sample = state.samples.find((item) => String(item.id) === String(id));
+      const sample = visibleSamples().find((item) => String(item.id) === String(id));
       if (sample) showSampleCard(sample, false);
     } else if (!state.selectedId) {
       hideHoverCard();
@@ -627,6 +667,31 @@
     state.apColors.clear();
     const bssids = groupCounts(state.samples.map((sample) => sample.props.bssid || "Unknown")).map(([bssid]) => bssid);
     bssids.forEach((bssid, index) => state.apColors.set(bssid, categoricalColors[index % categoricalColors.length]));
+  }
+
+  function visibleSamples() {
+    if (state.cellularFilter === "hide") {
+      return state.samples.filter((sample) => !isCellularSample(sample));
+    }
+    if (state.cellularFilter === "only") {
+      return state.samples.filter(isCellularSample);
+    }
+    return state.samples;
+  }
+
+  function visibleHops(samples) {
+    if (!samples.length) return [];
+    const first = samples[0].capturedAt;
+    const last = samples[samples.length - 1].capturedAt;
+    return state.hops.filter((hop) => hop.capturedAt >= first && hop.capturedAt <= last);
+  }
+
+  function isCellularSample(sample) {
+    const props = sample.props || {};
+    const cellular = props.transport_cellular;
+    if (cellular === true || cellular === 1 || cellular === "1") return true;
+    if (typeof cellular === "string" && cellular.toLowerCase() === "true") return true;
+    return String(props.default_transports || "").toLowerCase().includes("cellular");
   }
 
   function showEmpty(message) {
