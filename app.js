@@ -78,7 +78,8 @@
     cellularFilter: "all",
     apFilter: null,
     apFilterAnchorAt: null,
-    showAdjacentAps: false
+    showAdjacentAps: false,
+    apContext: null
   };
 
   const els = {
@@ -222,6 +223,7 @@
 
   function handleCellularFilterChange() {
     state.cellularFilter = els.cellularFilter.value;
+    invalidateApContext();
     reconcileSelectionWithVisibleSamples();
     renderAll();
   }
@@ -240,7 +242,9 @@
   function applyApFilter(bssid, anchorAt) {
     if (!bssid) return;
     state.apFilter = bssid;
+    invalidateApContext();
     state.apFilterAnchorAt = Number.isFinite(anchorAt) ? anchorAt : firstSampleForAp(bssid)?.capturedAt ?? null;
+    invalidateApContext();
     reconcileSelectionWithVisibleSamples();
     renderAll();
   }
@@ -250,12 +254,14 @@
     state.apFilterAnchorAt = null;
     state.showAdjacentAps = false;
     els.showAdjacentAps.checked = false;
+    invalidateApContext();
     reconcileSelectionWithVisibleSamples();
     renderAll();
   }
 
   function handleAdjacentApsChange() {
     state.showAdjacentAps = els.showAdjacentAps.checked;
+    invalidateApContext();
     reconcileSelectionWithVisibleSamples();
     renderAll();
   }
@@ -270,6 +276,7 @@
     state.apFilterAnchorAt = runs[nextIndex].startAt;
     state.selectedId = runs[nextIndex].startId;
     state.activeId = null;
+    invalidateApContext();
     renderAll();
   }
 
@@ -285,6 +292,7 @@
   }
 
   function renderAll() {
+    invalidateApContext();
     els.datasetName.textContent = state.datasetLabel;
     renderMap();
     renderSummary();
@@ -789,40 +797,35 @@
   }
 
   function visibleSamples() {
-    let samples = samplesWithoutApFilter();
-    if (state.apFilter) {
-      samples = samples.filter((sample) => sample.props.bssid === state.apFilter || isAdjacentApSample(sample));
-    }
-    return samples;
+    return apContext().visibleSamples;
   }
 
   function samplesWithoutApFilter() {
-    let samples = state.samples;
-    if (state.cellularFilter === "hide") {
-      samples = samples.filter((sample) => !isCellularSample(sample));
-    }
-    if (state.cellularFilter === "only") {
-      samples = samples.filter(isCellularSample);
-    }
-    return samples;
+    return apContext().baseSamples;
   }
 
   function apRuns() {
+    return apContext().runs;
+  }
+
+  function buildApRuns(samples) {
     const runs = [];
-    for (const sample of samplesWithoutApFilter()) {
+    for (const sample of samples) {
       const bssid = sample.props.bssid;
       if (!bssid) continue;
       const last = runs[runs.length - 1];
       if (last && last.bssid === bssid) {
         last.endAt = sample.capturedAt;
         last.count += 1;
+        last.sampleIds.add(String(sample.id));
       } else {
         runs.push({
           bssid,
           startAt: sample.capturedAt,
           endAt: sample.capturedAt,
           startId: sample.id,
-          count: 1
+          count: 1,
+          sampleIds: new Set([String(sample.id)])
         });
       }
     }
@@ -844,19 +847,53 @@
   }
 
   function adjacentApRuns() {
-    if (!state.apFilter || !state.showAdjacentAps) return [];
-    const runs = apRuns();
-    const currentIndex = focusedApRunIndex(runs);
-    if (currentIndex < 0) return [];
-    return [runs[currentIndex - 1], runs[currentIndex + 1]].filter(Boolean);
+    return apContext().adjacentRuns;
   }
 
   function isAdjacentApSample(sample) {
-    return adjacentApRuns().some((run) => (
-      sample.props.bssid === run.bssid
-      && sample.capturedAt >= run.startAt
-      && sample.capturedAt <= run.endAt
-    ));
+    return apContext().adjacentSampleIds.has(String(sample.id));
+  }
+
+  function apContext() {
+    if (state.apContext) return state.apContext;
+
+    const baseSamples = samplesWithTransportFilter();
+    const runs = buildApRuns(baseSamples);
+    const focusedRunIndex = focusedApRunIndex(runs);
+    const adjacentRuns = state.apFilter && state.showAdjacentAps && focusedRunIndex >= 0
+      ? [runs[focusedRunIndex - 1], runs[focusedRunIndex + 1]].filter(Boolean)
+      : [];
+    const adjacentSampleIds = new Set();
+    for (const run of adjacentRuns) {
+      for (const id of run.sampleIds) adjacentSampleIds.add(id);
+    }
+    const visibleSamples = state.apFilter
+      ? baseSamples.filter((sample) => sample.props.bssid === state.apFilter || adjacentSampleIds.has(String(sample.id)))
+      : baseSamples;
+
+    state.apContext = {
+      baseSamples,
+      runs,
+      focusedRunIndex,
+      adjacentRuns,
+      adjacentSampleIds,
+      visibleSamples
+    };
+    return state.apContext;
+  }
+
+  function invalidateApContext() {
+    state.apContext = null;
+  }
+
+  function samplesWithTransportFilter() {
+    if (state.cellularFilter === "hide") {
+      return state.samples.filter((sample) => !isCellularSample(sample));
+    }
+    if (state.cellularFilter === "only") {
+      return state.samples.filter(isCellularSample);
+    }
+    return state.samples;
   }
 
   function visibleHops(samples) {
