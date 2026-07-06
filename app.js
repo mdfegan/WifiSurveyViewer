@@ -148,8 +148,11 @@
     els.timelineMetric.addEventListener("change", renderTimeline);
     els.cellularFilter.addEventListener("change", handleCellularFilterChange);
     els.showApEstimates.addEventListener("change", handleApEstimatesChange);
+    els.showApEstimates.addEventListener("input", handleApEstimatesChange);
     els.showMapHops.addEventListener("change", handleMapHopDisplayChange);
+    els.showMapHops.addEventListener("input", handleMapHopDisplayChange);
     els.showHopHeatmap.addEventListener("change", handleMapHopDisplayChange);
+    els.showHopHeatmap.addEventListener("input", handleMapHopDisplayChange);
     els.fileInput.addEventListener("change", handleFilePick);
     els.clearSelection.addEventListener("click", clearSelection);
     els.previousApFilter.addEventListener("click", () => stepApFilter(-1));
@@ -361,8 +364,14 @@
     const hops = visibleHops(samples);
     const apEstimates = state.showApEstimates ? estimateApLocations(samples) : [];
     if (state.route) state.route.remove();
-    if (state.hopLayer) state.hopLayer.remove();
-    if (state.hopHeatLayer) state.hopHeatLayer.remove();
+    if (state.hopLayer) {
+      state.hopLayer.clearLayers();
+      state.hopLayer.remove();
+    }
+    if (state.hopHeatLayer) {
+      state.hopHeatLayer.clearLayers();
+      state.hopHeatLayer.remove();
+    }
     if (state.apEstimateLayer) state.apEstimateLayer.remove();
     for (const marker of state.markers.values()) marker.remove();
     state.markers.clear();
@@ -938,12 +947,13 @@
   function hopHeatStyle(point) {
     const intensity = clamp(point.count, 1, 8);
     return {
-      radius: 14 + intensity * 4,
+      radius: 18 + intensity * 5,
+      fill: true,
       fillColor: "#dc2626",
-      fillOpacity: clamp(0.13 + intensity * 0.035, 0.16, 0.42),
+      fillOpacity: clamp(0.18 + intensity * 0.045, 0.22, 0.55),
       color: "#991b1b",
-      weight: 0,
-      opacity: 0,
+      weight: 1,
+      opacity: 0.18,
       className: "hop-heat-point"
     };
   }
