@@ -31,15 +31,11 @@
             <select id="timelineMetric"></select>
           </label>
           <label>
-            <span>Probe endpoint</span>
-            <select id="probeRole"><option value="internet">Primary endpoint</option><option value="local">Local endpoint</option><option value="all">Both endpoints</option></select>
-          </label>
-          <label>
-            <span>Cellular probe path</span>
+            <span>Cellular pings</span>
             <select id="cellularFilter">
-              <option value="all">Show all probes</option>
-              <option value="hide">Hide cellular probes</option>
-              <option value="only">Only cellular probes</option>
+              <option value="all">Show all pings</option>
+              <option value="hide">Hide cellular pings</option>
+              <option value="only">Show only cellular pings</option>
             </select>
           </label>
           <label class="map-toggle">
@@ -48,11 +44,11 @@
           </label>
           <label class="map-toggle">
             <input id="showMapHops" type="checkbox" checked>
-            <span>Show AP change markers</span>
+            <span>Show AP hop markers</span>
           </label>
           <label class="map-toggle">
             <input id="showHopHeatmap" type="checkbox">
-            <span>Show confirmed AP change heatmap</span>
+            <span>Show AP hop heatmap</span>
           </label>
           <div class="ap-filter-control">
             <span>AP focus</span>
@@ -66,10 +62,6 @@
               <span>Show adjacent APs</span>
             </label>
           </div>
-          <label class="map-toggle"><input id="includeLegacyHops" type="checkbox"><span>Include unverified legacy AP changes</span></label>
-          <p id="dataQuality" class="data-quality" role="status"></p>
-          <details><summary>Survey setup</summary><dl id="surveyMetadata" class="summary-grid"></dl></details>
-          <details><summary>Event log <span id="eventCount"></span></summary><ol id="eventLog" class="event-log"></ol></details>
           <div id="legend" class="legend"></div>
           <dl id="summary" class="summary-grid"></dl>
         </aside>
@@ -97,7 +89,6 @@
     </main>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-    <script src="survey-data.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

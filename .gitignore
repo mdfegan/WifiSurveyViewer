@@ -2,7 +2,3 @@
 *.csv
 *.kml
 *.geojson
-
-# Local tooling and validation outputs
-node_modules/
-test-results/
