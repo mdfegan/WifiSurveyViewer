@@ -842,3 +842,14 @@ select {
     font-size: 18px;
   }
 }
+
+.data-quality { margin: 4px 0 12px; color: #8a4b0f; font-size: 12px; line-height: 1.5; }
+.control-panel details { border-top: 1px solid var(--border, #dce5eb); padding: 10px 0; }
+.control-panel summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.event-log { max-height: 230px; overflow: auto; margin: 10px 0 0; padding-left: 18px; }
+.event-log li { margin-bottom: 6px; font-size: 12px; }
+.event-log button { border: 0; background: transparent; padding: 3px; text-align: left; color: inherit; cursor: pointer; font: inherit; }
+.event-log button:hover, .event-log button:focus-visible { color: #007466; text-decoration: underline; }
+.timeline-failure { fill: #b93e45; stroke: white; stroke-width: 1; cursor: pointer; }
+.timeline-interruption { fill: rgba(185, 62, 69, .14); stroke: #b93e45; stroke-dasharray: 3 3; cursor: pointer; }
+.timeline-network-event { stroke: #64748b; stroke-width: 3; stroke-dasharray: 2 4; cursor: pointer; }

@@ -1,4 +1,5 @@
 (function () {
+  const D = SurveyData;
   const DEFAULT_GEOJSON = "ramp-wifi-20260705-012256.geojson";
 
   const metricOptions = {
@@ -14,9 +15,9 @@
       legendMax: "-45 dBm"
     },
     packetLoss: {
-      label: "Packet loss",
+      label: "Probe failure rate",
       unit: "%",
-      field: "packet_loss_percent",
+      field: "probe_failure_percent",
       domain: () => [0, 10],
       goodHigh: false,
       missing: (value) => value == null,
@@ -36,18 +37,24 @@
       legendMax: (samples) => `${Math.max(600, maxMetric(samples, "link_speed_mbps"))} Mbps`
     },
     latency: {
-      label: "Latency",
+      label: "TCP connect time",
       unit: "ms",
-      field: "latency_ms",
-      domain: (samples) => [0, Math.max(50, percentile(metricValues(samples, "latency_ms"), 0.95))],
+      field: "tcp_connect_ms",
+      domain: (samples) => [0, Math.max(50, percentile(metricValues(samples, "tcp_connect_ms"), 0.95))],
       goodHigh: false,
       missing: (value) => value == null,
-      format: (value) => value == null ? "timeout" : `${Math.round(value)} ms`,
+      format: (value) => value == null ? "not measured" : `${Math.round(value)} ms`,
       legendMin: "0 ms",
-      legendMax: (samples) => `${Math.round(Math.max(50, percentile(metricValues(samples, "latency_ms"), 0.95)))} ms p95`
+      legendMax: (samples) => `${Math.round(Math.max(50, percentile(metricValues(samples, "tcp_connect_ms"), 0.95)))} ms p95`
     },
+    dns: {
+      label: "DNS resolution time", unit: "ms", field: "dns_ms", domain: () => [0, 500], goodHigh: false,
+      missing: value => value == null || value < 0, format: value => value == null ? "not measured" : `${Math.round(value)} ms`,
+      legendMin: "0 ms", legendMax: "500 ms+"
+    },
+    transport: { label: "Tested transport" },
     band: {
-      label: "Band / cellular"
+      label: "WiFi band"
     },
     ap: {
       label: "Connected AP",
@@ -55,8 +62,8 @@
     }
   };
 
-  const timelineMetricKeys = ["rssi", "packetLoss", "linkSpeed", "latency"];
-  const mapMetricKeys = ["rssi", "packetLoss", "linkSpeed", "latency", "band", "ap"];
+  const timelineMetricKeys = ["rssi", "packetLoss", "linkSpeed", "latency", "dns"];
+  const mapMetricKeys = ["rssi", "packetLoss", "linkSpeed", "latency", "dns", "transport", "band", "ap"];
   const categoricalColors = [
     "#0f766e", "#2563eb", "#a21caf", "#e11d48", "#ca8a04", "#16a34a",
     "#7c3aed", "#ea580c", "#0891b2", "#be123c", "#4d7c0f", "#4338ca",
@@ -77,6 +84,11 @@
     map: null,
     samples: [],
     hops: [],
+    events: [],
+    metadata: {},
+    rejected: 0,
+    roleFilter: "internet",
+    includeLegacyHops: false,
     apColors: new Map(),
     markers: new Map(),
     timelineDots: new Map(),
@@ -100,6 +112,12 @@
 
   const els = {
     datasetName: document.getElementById("datasetName"),
+    probeRole: document.getElementById("probeRole"),
+    includeLegacyHops: document.getElementById("includeLegacyHops"),
+    dataQuality: document.getElementById("dataQuality"),
+    surveyMetadata: document.getElementById("surveyMetadata"),
+    eventLog: document.getElementById("eventLog"),
+    eventCount: document.getElementById("eventCount"),
     fileInput: document.getElementById("fileInput"),
     mapMetric: document.getElementById("mapMetric"),
     timelineMetric: document.getElementById("timelineMetric"),
@@ -133,6 +151,7 @@
       maxZoom: 22,
       zoomControl: true
     });
+    state.map.setView([0, 0], 2);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxNativeZoom: 19,
       maxZoom: 22,
@@ -146,6 +165,10 @@
       renderLegend();
     });
     els.timelineMetric.addEventListener("change", renderTimeline);
+    els.probeRole.addEventListener("change", () => {
+      state.roleFilter = els.probeRole.value; invalidateApContext(); reconcileSelectionWithVisibleSamples(); renderAll();
+    });
+    els.includeLegacyHops.addEventListener("change", () => { state.includeLegacyHops = els.includeLegacyHops.checked; renderAll(); });
     els.cellularFilter.addEventListener("change", handleCellularFilterChange);
     els.showApEstimates.addEventListener("change", handleApEstimatesChange);
     els.showApEstimates.addEventListener("input", handleApEstimatesChange);
@@ -202,7 +225,7 @@
       try {
         loadSurvey(JSON.parse(reader.result), file.name);
       } catch (error) {
-        showEmpty("That file could not be parsed as GeoJSON.");
+        showEmpty(`That survey could not be opened: ${error.message}`);
         console.error(error);
       }
     };
@@ -210,29 +233,14 @@
   }
 
   function loadSurvey(geojson, label) {
-    const features = Array.isArray(geojson.features) ? geojson.features : [];
-    const samples = [];
-    const hops = [];
-
-    for (const feature of features) {
-      if (!feature || !feature.geometry || feature.geometry.type !== "Point") continue;
-      const props = feature.properties || {};
-      const coords = feature.geometry.coordinates || [];
-      const item = {
-        id: props._id ?? `${samples.length}-${props.captured_at ?? ""}`,
-        lon: Number(coords[0]),
-        lat: Number(coords[1]),
-        capturedAt: Number(props.captured_at),
-        props
-      };
-      if (!Number.isFinite(item.lon) || !Number.isFinite(item.lat) || !Number.isFinite(item.capturedAt)) continue;
-      if (props.event_type === "hop") hops.push(item);
-      else samples.push(item);
-    }
-
-    state.samples = samples.sort((a, b) => a.capturedAt - b.capturedAt);
-    state.hops = hops.sort((a, b) => a.capturedAt - b.capturedAt);
+    const dataset = D.read(geojson);
+    state.samples = dataset.samples; state.hops = dataset.hops; state.events = dataset.events;
+    state.metadata = dataset.metadata; state.rejected = dataset.rejected;
+    state.roleFilter = "internet"; els.probeRole.value = "internet";
+    els.probeRole.querySelector('[value="local"]').disabled = !dataset.samples.some(s => s.props.probe_role === "local");
+    state.includeLegacyHops = false; els.includeLegacyHops.checked = false;
     state.datasetLabel = label;
+    state.pinnedEvent = null;
     state.selectedId = null;
     state.activeId = null;
     state.timelineZoom = 1;
@@ -326,6 +334,7 @@
   }
 
   function reconcileSelectionWithVisibleSamples() {
+    state.pinnedEvent = null;
     const samples = visibleSamples();
     if (!samples.some((sample) => String(sample.id) === String(state.selectedId))) {
       state.selectedId = null;
@@ -345,6 +354,8 @@
     renderLegend();
     renderTimeline();
     refreshVisibleSampleCard();
+    renderDataQuality();
+    renderEvents();
     refreshMapSize();
   }
 
@@ -360,8 +371,9 @@
   }
 
   function renderMap() {
-    const samples = visibleSamples();
-    const hops = visibleHops(samples);
+    const allSamples = visibleSamples();
+    const samples = allSamples.filter(s => s.mapped);
+    const hops = visibleHops(allSamples).filter(h => h.mapped);
     const apEstimates = state.showApEstimates ? estimateApLocations(samples) : [];
     if (state.route) state.route.remove();
     if (state.hopLayer) {
@@ -377,7 +389,7 @@
     state.markers.clear();
 
     if (!state.samples.length) {
-      showEmpty("No point samples found in this GeoJSON.");
+      els.dataQuality.textContent = "No measurements found; any recorded events are retained below.";
       return;
     }
 
@@ -389,7 +401,7 @@
       return;
     }
 
-    const latLngs = samples.map((sample) => [sample.lat, sample.lon]);
+    const latLngs = D.segments(allSamples);
     state.route = L.polyline(latLngs, { className: "route-line" }).addTo(state.map);
 
     for (const sample of samples) {
@@ -416,7 +428,7 @@
 
     state.hopHeatLayer = L.layerGroup();
     if (state.showHopHeatmap) {
-      for (const heatPoint of hopHeatPoints(hops)) {
+      for (const heatPoint of hopHeatPoints(hops.filter(D.confirmedHop))) {
         L.circleMarker([heatPoint.lat, heatPoint.lon], hopHeatStyle(heatPoint))
           .bindPopup(hopHeatPopup(heatPoint))
           .addTo(state.hopHeatLayer);
@@ -460,6 +472,7 @@
 
   function colorForSample(sample, metricKey) {
     if (isAdjacentApSample(sample)) return ADJACENT_AP_COLOR;
+    if (metricKey === "transport") return transportColor(D.transport(sample));
     if (metricKey === "band") return bandColors[connectionBandCategory(sample)] || bandColors.Other;
     if (metricKey === "ap") return state.apColors.get(sample.props.bssid) || "#64748b";
     const metric = metricOptions[metricKey];
@@ -490,7 +503,7 @@
       ["Strongest RSSI", metricOptions.rssi.format(estimate.maxRssi)],
       ["Mean RSSI", metricOptions.rssi.format(estimate.meanRssi)],
       ["Scatter radius", `${Math.round(estimate.scatterM)} m`],
-      ["Confidence", estimate.confidence],
+      ["Confidence (heuristic)", estimate.confidence],
       ["Latitude", estimate.lat.toFixed(7)],
       ["Longitude", estimate.lon.toFixed(7)]
     ];
@@ -500,17 +513,23 @@
   function renderSummary() {
     const samples = visibleSamples();
     const hops = visibleHops(samples);
-    const apEstimateCount = state.showApEstimates ? estimateApLocations(samples).length : 0;
+    const apEstimateCount = state.showApEstimates ? estimateApLocations(samples.filter(s => s.mapped)).length : 0;
+    const quality = D.summarize(samples);
     const durationMs = samples.length ? samples[samples.length - 1].capturedAt - samples[0].capturedAt : 0;
     const ssids = unique(samples.map((sample) => sample.props.ssid).filter(Boolean));
     const apCount = unique(samples.map((sample) => sample.props.bssid).filter(Boolean)).length;
     const items = [
-      ["Points", samples.length.toLocaleString()],
-      ["Cellular", state.samples.filter(isCellularSample).length.toLocaleString()],
+      ["Measurements", samples.length.toLocaleString()],
+      ["Mapped", quality.mapped.toLocaleString()],
+      ["Without usable GPS", (quality.count - quality.mapped).toLocaleString()],
+      ["Probe failures / attempts", `${quality.failures} / ${quality.attempts}`],
+      ["Overall failure rate", quality.failurePercent == null ? "n/a" : `${quality.failurePercent.toFixed(1)}%`],
+      ["Unavailable / skipped", `${quality.unavailable} / ${quality.skipped}`],
+      ["Cellular", samples.filter(isCellularSample).length.toLocaleString()],
       ["AP filter", state.apFilter || "All"],
       ["Adjacent", state.apFilter && state.showAdjacentAps ? "Shown" : "Hidden"],
       ["AP estimates", state.showApEstimates ? apEstimateCount.toLocaleString() : "Hidden"],
-      ["AP hops", hops.length.toLocaleString()],
+      ["Confirmed AP changes", hops.filter(D.confirmedHop).length.toLocaleString()],
       ["Duration", formatDuration(durationMs)],
       ["SSID", ssids.length === 1 ? ssids[0] : `${ssids.length} SSIDs`],
       ["Unique APs", apCount.toLocaleString()],
@@ -554,6 +573,10 @@
       els.legend.append(hopHeatLegendItem());
     }
 
+    if (metricKey === "transport") {
+      renderCategoryLegend(groupCounts(samples.map(D.transport)), transportColor);
+      return;
+    }
     if (metricKey === "band") {
       renderCategoryLegend(groupCounts(samples.map(connectionBandCategory)), (category) => bandColors[category] || bandColors.Other);
       return;
@@ -641,25 +664,28 @@
     const metric = metricOptions[metricKey];
     els.timelineTitle.textContent = `${metric.label} Timeline`;
     if (!samples.length) {
-      els.timelineSubtitle.textContent = "No pings match the current cellular filter.";
+      els.timelineSubtitle.textContent = "No measurements match the selected endpoint and path filters.";
       drawText(svg, width / 2, height / 2, "No matching pings", "empty-state", "middle");
       state.timelineDots.clear();
       return;
     }
-    els.timelineSubtitle.textContent = `${hops.length} AP changes marked across ${formatDuration(samples[samples.length - 1].capturedAt - samples[0].capturedAt)}.`;
+    els.timelineSubtitle.textContent = `${hops.filter(D.confirmedHop).length} confirmed AP changes${hops.some(h => !D.confirmedHop(h)) ? " plus unverified legacy changes" : ""}; red dots are failed/unavailable probes. Across ${formatDuration(samples[samples.length - 1].capturedAt - samples[0].capturedAt)}.`;
 
     const margin = { top: 18, right: 22, bottom: 28, left: 54 };
     const plotW = width - margin.left - margin.right;
     const plotH = height - margin.top - margin.bottom;
-    const tMin = samples[0].capturedAt;
-    const tMax = samples[samples.length - 1].capturedAt;
+    const eventTimes = relevantEvents(samples).map(e => e.capturedAt);
+    const tMin = eventTimes.reduce((min, time) => Math.min(min, time), samples[0].capturedAt);
+    const tMax = samples.reduce((max, s) => Math.max(max, D.number(s.props.probe_finished_at) ?? s.capturedAt),
+      eventTimes.reduce((max, time) => Math.max(max, time), samples[samples.length - 1].capturedAt));
     const [yMin, yMax] = metric.domain(samples);
-    const x = (time) => margin.left + ((time - tMin) / Math.max(1, tMax - tMin)) * plotW;
+    const x = (time) => margin.left + clamp((time - tMin) / Math.max(1, tMax - tMin), 0, 1) * plotW;
     const y = (value) => margin.top + (1 - clamp((value - yMin) / Math.max(1, yMax - yMin), 0, 1)) * plotH;
     const baseline = margin.top + plotH;
 
-    drawGrid(svg, width, height, margin, yMin, yMax, metric, samples);
+    drawGrid(svg, width, height, margin, yMin, yMax, metric, [{ capturedAt: tMin }, { capturedAt: tMax }]);
     drawHops(svg, x, margin, plotH, hops);
+    drawEvents(svg, x, margin, plotH, samples, tMin, tMax);
 
     const valid = samples
       .map((sample) => ({ sample, value: metricNumber(sample, metric) }))
@@ -667,7 +693,6 @@
 
     if (!valid.length) {
       drawText(svg, width / 2, height / 2, "No values available for this metric", "empty-state", "middle");
-      return;
     }
 
     const lineParts = [];
@@ -678,6 +703,12 @@
         if (current.length) lineParts.push(current);
         current = [];
       } else {
+        const previous = current[current.length - 1]?.sample;
+        if (previous && (sample.props.probe_role !== previous.props.probe_role
+            || sample.props.probe_network_id !== previous.props.probe_network_id
+            || sample.capturedAt - previous.capturedAt > Math.max(5000, (sample.props.probe_interval_ms || 2000) * 3))) {
+          lineParts.push(current); current = [];
+        }
         current.push({ sample, value });
       }
     }
@@ -705,6 +736,15 @@
       dot.append(title);
       svg.append(dot);
       state.timelineDots.set(String(point.sample.id), dot);
+    }
+    for (const sample of samples.filter(s => ["failure", "unavailable", "skipped"].includes(s.props.probe_status))) {
+      const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      dot.setAttribute("cx", x(sample.capturedAt)); dot.setAttribute("cy", baseline - 5); dot.setAttribute("r", 4);
+      dot.setAttribute("class", "timeline-failure");
+      const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+      title.textContent = `${formatTime(sample.capturedAt)} · ${sample.props.probe_status}: ${sample.props.probe_error || ""}`;
+      dot.append(title); dot.addEventListener("click", () => selectSample(sample.id));
+      svg.append(dot);
     }
     applyHighlightClasses();
     if (state.selectedId) scrollTimelineToSample(state.selectedId, false);
@@ -740,11 +780,12 @@
   }
 
   function selectSample(id) {
+    state.pinnedEvent = null;
     state.selectedId = String(state.selectedId) === String(id) ? null : String(id);
     if (state.selectedId) {
       const sample = visibleSamples().find((item) => String(item.id) === String(id));
       if (sample) {
-        state.map.panTo([sample.lat, sample.lon], { animate: true, duration: 0.25 });
+        if (sample.mapped) state.map.panTo([sample.lat, sample.lon], { animate: true, duration: 0.25 });
         showSampleCard(sample, true);
         scrollTimelineToSample(sample.id, true);
       } else {
@@ -759,6 +800,7 @@
   function clearSelection() {
     state.selectedId = null;
     state.activeId = null;
+    state.pinnedEvent = null;
     hideHoverCard();
     applyHighlightClasses();
   }
@@ -806,12 +848,19 @@
       ["SSID", p.ssid || "n/a"],
       ["BSSID", p.bssid || "n/a"],
       ["RSSI", metricOptions.rssi.format(p.rssi_dbm)],
-      ["Packet loss", metricOptions.packetLoss.format(p.packet_loss_percent)],
+      ["Probe failure rate", metricOptions.packetLoss.format(p.probe_failure_percent)],
       ["Link speed", metricOptions.linkSpeed.format(p.link_speed_mbps)],
-      ["Latency", metricOptions.latency.format(p.latency_ms)],
+      ["TCP connect", metricOptions.latency.format(p.tcp_connect_ms)],
+      ["DNS", metricOptions.dns.format(p.dns_ms)],
+      ["Attempts / failures · 60s", `${p.probe_window_attempts ?? "unknown"} / ${p.probe_window_failures ?? "unknown"}`],
+      ["Tested path", `${D.transport(sample)}${sample.version < 2 ? " (unverified legacy path)" : ""}`],
+      ["AP confidence", p.bssid_source || "unknown"],
+      ["Inferred AP", p.inferred_bssid || "none"],
+      ["GPS quality", p.location_quality || "unverified legacy fix"],
+      ["Fix age", p.location_age_ms == null ? "unknown" : `${p.location_age_ms} ms`],
       ["Standard", p.wifi_standard || "n/a"],
       ["Band", p.band || "n/a"],
-      ["Probe", p.probe_success ? "success" : (p.probe_error || "failed")]
+      ["Probe", `${p.probe_status}${p.probe_error ? ` · ${p.probe_error}` : ""}`]
     ];
     return `<dl>${rows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd>`).join("")}</dl>`;
   }
@@ -837,12 +886,12 @@
     ];
     const propRows = Object.entries(sample.props)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, value]) => [key, value == null || value === "" ? "n/a" : value]);
+      .map(([key, value]) => [key, value == null || value === "" ? "n/a" : typeof value === "object" ? JSON.stringify(value) : value]);
     return baseRows.concat(propRows);
   }
 
   function hopPopup(hop) {
-    return `<strong>AP hop</strong><dl><dt>Time</dt><dd>${escapeHtml(formatTime(hop.capturedAt))}</dd><dt>From</dt><dd>${escapeHtml(hop.props.from_bssid || "n/a")}</dd><dt>To</dt><dd>${escapeHtml(hop.props.to_bssid || "n/a")}</dd><dt>SSID</dt><dd>${escapeHtml(hop.props.ssid || "n/a")}</dd></dl>`;
+    return eventPopup(hop);
   }
 
   function showSampleCard(sample, allFields) {
@@ -859,11 +908,11 @@
 
   function showHopCard(hop) {
     els.hoverCard.hidden = false;
-    els.hoverCard.innerHTML = `<strong>${escapeHtml(hopTitle(hop))}</strong><dl><dt>Time</dt><dd>${escapeHtml(formatTime(hop.capturedAt))}</dd><dt>SSID</dt><dd>${escapeHtml(hop.props.ssid || "n/a")}</dd><dt>RSSI change</dt><dd>${escapeHtml(`${hop.props.from_rssi_dbm ?? "n/a"} to ${hop.props.to_rssi_dbm ?? "n/a"} dBm`)}</dd></dl>`;
+    els.hoverCard.innerHTML = eventPopup(hop);
   }
 
   function hideHoverCard() {
-    if (!state.selectedId) els.hoverCard.hidden = true;
+    if (!state.selectedId && !state.pinnedEvent) els.hoverCard.hidden = true;
   }
 
   function setTimelineZoom(nextZoom) {
@@ -910,7 +959,7 @@
   }
 
   function hopIcon(hop) {
-    const color = state.apColors.get(hop.props.to_bssid) || "#8b1e3f";
+    const color = D.confirmedHop(hop) ? state.apColors.get(hop.props.to_bssid) || "#007466" : "#a76709";
     return L.divIcon({
       className: "hop-marker",
       html: `<span style="display:grid;place-items:center;width:26px;height:26px;border-radius:50%;border:2px solid #fff;background:${color};box-shadow:0 2px 8px rgba(0,0,0,.35);font-size:15px;font-weight:900;color:#fff;">H</span>`,
@@ -982,11 +1031,12 @@
 
   function buildApRuns(samples) {
     const runs = [];
+    let continuous = true;
     for (const sample of samples) {
       const bssid = sample.props.bssid;
-      if (!bssid) continue;
+      if (!bssid) { continuous = false; continue; }
       const last = runs[runs.length - 1];
-      if (last && last.bssid === bssid) {
+      if (continuous && last && last.bssid === bssid) {
         last.endAt = sample.capturedAt;
         last.count += 1;
         last.sampleIds.add(String(sample.id));
@@ -1000,6 +1050,7 @@
           sampleIds: new Set([String(sample.id)])
         });
       }
+      continuous = true;
     }
     return runs;
   }
@@ -1059,20 +1110,16 @@
   }
 
   function samplesWithTransportFilter() {
-    if (state.cellularFilter === "hide") {
-      return state.samples.filter((sample) => !isCellularSample(sample));
-    }
-    if (state.cellularFilter === "only") {
-      return state.samples.filter(isCellularSample);
-    }
-    return state.samples;
+    return state.samples.filter(s => (state.roleFilter === "all" || s.props.probe_role === state.roleFilter)
+      && (state.cellularFilter === "all" || (state.cellularFilter === "only") === isCellularSample(s)));
   }
 
   function visibleHops(samples) {
     if (!samples.length) return [];
-    const first = samples[0].capturedAt;
-    const last = samples[samples.length - 1].capturedAt;
+    const first = samples[0].capturedAt - 1000;
+    const last = samples[samples.length - 1].capturedAt + 5000;
     return state.hops.filter((hop) => {
+      if (!D.confirmedHop(hop) && !state.includeLegacyHops) return false;
       if (hop.capturedAt < first || hop.capturedAt > last) return false;
       if (!state.apFilter) return true;
       return hop.props.from_bssid === state.apFilter || hop.props.to_bssid === state.apFilter;
@@ -1083,8 +1130,8 @@
     const groups = new Map();
     for (const sample of samples) {
       const bssid = sample.props.bssid;
-      const rssi = Number(sample.props.rssi_dbm);
-      if (!bssid || !Number.isFinite(rssi)) continue;
+      const rssi = D.number(sample.props.rssi_dbm);
+      if (!sample.mapped || !sample.apConfirmed || !bssid || rssi == null || !Number.isFinite(rssi)) continue;
       if (!groups.has(bssid)) groups.set(bssid, []);
       groups.get(bssid).push(sample);
     }
@@ -1145,17 +1192,13 @@
     return "low";
   }
 
-  function isCellularSample(sample) {
-    const props = sample.props || {};
-    const cellular = props.transport_cellular;
-    if (cellular === true || cellular === 1 || cellular === "1") return true;
-    if (typeof cellular === "string" && cellular.toLowerCase() === "true") return true;
-    return String(props.default_transports || "").toLowerCase().includes("cellular");
+  function isCellularSample(sample) { return D.transport(sample).toLowerCase().includes("cellular"); }
+  function transportColor(value) {
+    return value.includes("VPN") ? "#7c3aed" : value.includes("Cellular") ? "#e11d48"
+      : value.includes("Wi-Fi") ? "#007466" : "#64748b";
   }
 
   function connectionBandCategory(sample) {
-    if (isCellularSample(sample)) return "Cellular";
-
     const band = String(sample.props.band || "").toLowerCase();
     if (band.includes("2.4")) return "2.4 GHz";
     if (band.includes("5")) return "5 GHz";
@@ -1169,6 +1212,103 @@
     }
 
     return "Other";
+  }
+
+  function relevantEvents(samples = visibleSamples()) {
+    const first = samples[0]?.capturedAt ?? -Infinity;
+    const last = samples.length ? samples[samples.length - 1].capturedAt + 5000 : Infinity;
+    return state.events.filter(e => {
+      const data = e.props.event_data || {};
+      const eventStart = D.number(data.first_failure_at) ?? e.capturedAt;
+      return (!state.apFilter || eventStart <= last && e.capturedAt >= first)
+        && (state.roleFilter === "all" || !data.probe_role || data.probe_role === state.roleFilter);
+    });
+  }
+
+  function eventPopup(event) {
+    const rows = [["Time", formatTime(event.capturedAt)], ...D.eventRows(event)];
+    return `<strong>${escapeHtml(D.eventLabel(event))}</strong><dl>${rows.map(([key, value]) =>
+      `<dt>${escapeHtml(key)}</dt><dd>${escapeHtml(String(value))}</dd>`).join("")}</dl>`;
+  }
+
+  function showEventCard(event) {
+    state.selectedId = null;
+    state.pinnedEvent = event;
+    els.hoverCard.hidden = false; els.hoverCard.innerHTML = eventPopup(event);
+    if (event.mapped) state.map.panTo([event.lat, event.lon]);
+    applyHighlightClasses();
+  }
+
+  function renderEvents() {
+    const events = [...relevantEvents(), ...visibleHops(visibleSamples())].sort((a, b) => a.capturedAt - b.capturedAt);
+    els.eventCount.textContent = `(${events.length})`;
+    els.eventLog.replaceChildren();
+    for (const event of events.slice(-100)) {
+      const item = document.createElement("li"), button = document.createElement("button");
+      button.type = "button";
+      button.textContent = `${formatTime(event.capturedAt)} · ${D.eventLabel(event)}`;
+      button.addEventListener("click", () => showEventCard(event));
+      item.append(button); els.eventLog.append(item);
+    }
+    if (events.length > 100) {
+      const notice = document.createElement("li"); notice.textContent = "Showing the latest 100 events."; els.eventLog.prepend(notice);
+    }
+    if (!events.length) { const item = document.createElement("li"); item.textContent = "No events for this selection."; els.eventLog.append(item); }
+  }
+
+  function renderDataQuality() {
+    const q = D.summarize(state.samples), notes = [];
+    if (q.count - q.mapped) notes.push(`${q.count - q.mapped} measurements have no usable GPS; they remain in the timeline (file totals).`);
+    if (state.apFilter) notes.push("AP-focused summaries exclude measurements without an identified AP. Clear AP focus to assess total interruptions.");
+    if (q.legacy) notes.push(`${q.legacy} legacy measurements: probe path and fix freshness are unverified. Legacy packet-loss values are connection-attempt failure rates; legacy latency can include DNS time.`);
+    if (state.hops.some(h => !D.confirmedHop(h)) && !state.includeLegacyHops) notes.push("Unverified legacy AP changes are hidden; use the checkbox to include them.");
+    if (state.rejected) notes.push(`${state.rejected} malformed records could not be read.`);
+    if (!q.count) notes.push("No measurements found. Recorded events are retained in the event log.");
+    if (q.count && !q.mapped) notes.push("No usable map positions are available.");
+    els.dataQuality.textContent = notes.join(" ");
+    els.dataQuality.hidden = !notes.length;
+    const m = state.metadata;
+    const rows = [["Name", m.name], ["Device", [m.device_manufacturer, m.device_model].filter(Boolean).join(" ")],
+      ["Android", m.android_version], ["Mode", m.probe_mode], ["Probe interval", m.probe_interval_ms == null ? null : `${m.probe_interval_ms} ms`],
+      ["Primary endpoint", m.primary_target], ["Local endpoint", m.local_target], ["Direction / route", m.walking_direction],
+      ["Pace", m.pace], ["Notes", m.notes], ["Recording segments", Array.isArray(m.segments) ? m.segments.length : null]];
+    els.surveyMetadata.replaceChildren();
+    for (const [key, value] of rows.filter(([, value]) => value != null && value !== "")) {
+      const wrapper = document.createElement("div"), dt = document.createElement("dt"), dd = document.createElement("dd");
+      dt.textContent = key; dd.textContent = String(value); wrapper.append(dt, dd); els.surveyMetadata.append(wrapper);
+    }
+    if (Array.isArray(m.segments) && m.segments.length > 1) {
+      m.segments.forEach((segment, index) => {
+        const wrapper = document.createElement("div"), dt = document.createElement("dt"), dd = document.createElement("dd");
+        dt.textContent = `Segment ${index + 1}${segment.started_at ? ` · ${formatTime(segment.started_at)}` : ""}`;
+        dd.textContent = [segment.probe_mode, `${segment.probe_interval_ms} ms`, segment.primary_target,
+          segment.local_target, segment.walking_direction, segment.pace, segment.notes].filter(Boolean).join(" · ");
+        wrapper.append(dt, dd); els.surveyMetadata.append(wrapper);
+      });
+    }
+    if (!els.surveyMetadata.childElementCount) els.surveyMetadata.textContent = "No survey setup metadata in this file.";
+  }
+
+  function drawEvents(svg, x, margin, plotH, samples, first, last) {
+    for (const event of relevantEvents(samples).filter(e => e.props.event_type !== "network_capabilities")) {
+      const data = event.props.event_data || {};
+      if (event.props.event_type === "interruption") {
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        const from = Math.max(first, D.number(data.first_failure_at) ?? event.capturedAt);
+        const to = Math.min(last, D.number(data.recovered_at) ?? event.capturedAt);
+        rect.setAttribute("x", x(from)); rect.setAttribute("y", margin.top);
+        rect.setAttribute("width", Math.max(3, x(to) - x(from))); rect.setAttribute("height", plotH);
+        rect.setAttribute("class", "timeline-interruption");
+        rect.addEventListener("click", () => showEventCard(event));
+        const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+        title.textContent = `Observed probe interruption · ${data.failed_probe_count ?? "?"} failures; timing resolution ${data.timing_resolution_ms ?? "?"} ms`;
+        rect.append(title); svg.append(rect);
+      } else if (event.capturedAt >= first && event.capturedAt <= last) {
+        const marker = drawLine(svg, x(event.capturedAt), margin.top, x(event.capturedAt), margin.top + plotH, "timeline-network-event");
+        const title = document.createElementNS("http://www.w3.org/2000/svg", "title"); title.textContent = D.eventLabel(event);
+        marker.append(title); marker.addEventListener("click", () => showEventCard(event));
+      }
+    }
   }
 
   function showEmpty(message) {
@@ -1187,7 +1327,7 @@
 
   function metricValues(samples, field) {
     return samples
-      .map((sample) => Number(sample.props[field]))
+      .map((sample) => D.number(sample.props[field]))
       .filter((value) => Number.isFinite(value) && value >= 0);
   }
 
@@ -1200,7 +1340,7 @@
 
   function maxMetric(samples, field) {
     const values = metricValues(samples, field);
-    return values.length ? Math.max(...values) : 0;
+    return values.reduce((max, value) => Math.max(max, value), 0);
   }
 
   function percentile(values, p) {
